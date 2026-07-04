@@ -1,0 +1,763 @@
+---
+title: "Pilot Study"
+output: html_document
+date: "2026-07-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+
+setwd("C:/Users/norba/Downloads/GCMS_R_Project_Report/GCMS_R_Project")
+getwd()
+
+library(tidyverse)
+library(readr)
+library(ggplot2)
+
+gcms <- read_csv(
+  "C:/Users/norba/Downloads/GCMS_R_Project_Report/GCMS_R_Project/data/gcms_tidy_r_input.csv",
+  show_col_types = FALSE
+)
+```
+
+#create folders in the project
+```{r}
+dir.create("figures", showWarnings = FALSE)
+dir.create("tables", showWarnings = FALSE)
+```
+
+
+#summarize data and place in the folders that were created above
+```{r}
+# Basic summaries
+write_csv(gcms %>% count(tissue, sample_id), "tables/sample_counts.csv")
+write_csv(gcms %>% distinct(tissue, compound_short) %>% count(tissue), "tables/unique_compounds_by_tissue.csv")
+write_csv(gcms %>% distinct(tissue, compound_short, chemical_class) %>% count(tissue, chemical_class), "tables/chemical_class_summary.csv")
+```
+
+
+```{r}
+# Chemical class composition
+class_summary <- gcms %>% distinct(tissue, compound_short, chemical_class) %>% count(tissue, chemical_class)
+
+p <- ggplot(class_summary, aes(x = tissue, y = n, fill = chemical_class)) +
+  geom_col(color = "black") +
+  theme_bw(base_size = 16) +
+  labs(title = "Chemical class composition by tissue",
+       x = "Tissue", y = "Number of unique compounds", fill = "Chemical class")
+p
+
+#saves in figures folder
+ggsave("figures/chemical_class_composition.png", p, width = 8, height = 6, dpi = 600)
+```
+
+
+```{r}
+# Presence/absence heatmap
+presence <- gcms %>% distinct(tissue, compound_short, chemical_class)
+
+pp <- ggplot(presence, aes(x = tissue, y = reorder(compound_short, chemical_class), fill = chemical_class)) +
+  geom_tile(color = "white") +
+  theme_bw(base_size = 14) +
+  labs(title = "Presence of putative compounds in leaf and root tissue",
+       x = "Tissue", y = "Compound", fill = "Chemical class")
+pp
+
+#saves in figures folder
+ggsave("figures/presence_absence_heatmap.png", p, width = 7, height = 10, dpi = 600)
+
+```
+
+
+```{r}
+# ============================================================
+# GC-MS Leaf vs Root Analysis Figures
+# Input file: data/gcms_tidy_r_input.csv
+# ============================================================
+
+# Load data
+gcms <- read_csv("C:/Users/norba/Downloads/GCMS_R_Project_Report/GCMS_R_Project/data/gcms_tidy_r_input.csv", show_col_types = FALSE)
+
+# Check data
+glimpse(gcms)
+
+# Make tissue and chemical class factors
+gcms <- gcms %>%
+  mutate(
+    tissue = factor(tissue, levels = c("Leaf", "Root")),
+    chemical_class = factor(
+      chemical_class,
+      levels = c(
+        "Monoterpene",
+        "Sesquiterpene",
+        "Putative diterpenoid",
+        "Hydrocarbon",
+        "Fatty alcohol",
+        "Fatty acid",
+        "Unknown"
+      )
+    )
+  )
+```
+
+
+```{r}
+# ============================================================
+# SUMMARY TABLES
+# ============================================================
+
+dataset_summary <- tibble(
+  metric = c(
+    "Total unique GC-MS observations",
+    "Unique compounds",
+    "Unique samples",
+    "Leaf samples",
+    "Root samples"
+  ),
+  value = c(
+    nrow(gcms),
+    n_distinct(gcms$compound_short),
+    n_distinct(gcms$sample_id),
+    n_distinct(gcms$sample_id[gcms$tissue == "Leaf"]),
+    n_distinct(gcms$sample_id[gcms$tissue == "Root"])
+  )
+)
+
+write_csv(dataset_summary, "tables/dataset_summary.csv")
+
+sample_counts <- gcms %>%
+  count(tissue, sample_id, name = "unique_observations")
+
+write_csv(sample_counts, "tables/sample_counts.csv")
+
+chemical_class_summary <- gcms %>%
+  distinct(tissue, compound_short, chemical_class) %>%
+  count(tissue, chemical_class, name = "unique_compounds")
+
+write_csv(chemical_class_summary, "tables/chemical_class_summary.csv")
+
+compound_detection_counts <- gcms %>%
+  count(compound_short, chemical_class, name = "detections") %>%
+  arrange(desc(detections), compound_short)
+
+write_csv(compound_detection_counts, "tables/compound_detection_counts.csv")
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 1: UNIQUE OBSERVATIONS PER SAMPLE
+# ============================================================
+
+p1 <- ggplot(sample_counts, aes(x = sample_id, y = unique_observations, fill = tissue)) +
+  geom_col(color = "black", width = 0.7) +
+  labs(
+    title = "Unique GC-MS Observations per Sample",
+    x = "Sample",
+    y = "Number of Unique Observations",
+    fill = "Tissue"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 15),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 14)
+  )
+
+p1
+ggsave("figures/Figure1_unique_observations_per_sample.png", p1, width = 8, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 2: UNIQUE COMPOUNDS BY TISSUE
+# ============================================================
+
+compound_counts_tissue <- gcms %>%
+  distinct(tissue, compound_short) %>%
+  count(tissue, name = "unique_compounds")
+
+write_csv(compound_counts_tissue, "tables/unique_compounds_by_tissue.csv")
+
+p2 <- ggplot(compound_counts_tissue, aes(x = tissue, y = unique_compounds, fill = tissue)) +
+  geom_col(color = "black", width = 0.6) +
+  labs(
+    title = "Unique Putative Compounds Detected by Tissue",
+    x = "Tissue",
+    y = "Number of Unique Compounds",
+    fill = "Tissue"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    legend.position = "none"
+  )
+
+p2
+ggsave("figures/Figure2_unique_compounds_by_tissue.png", p2, width = 7, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 3: CHEMICAL CLASS COMPOSITION BY TISSUE
+# ============================================================
+
+p3 <- ggplot(chemical_class_summary, aes(x = tissue, y = unique_compounds, fill = chemical_class)) +
+  geom_col(color = "black", width = 0.7) +
+  labs(
+    title = "Chemical Class Composition by Tissue",
+    x = "Tissue",
+    y = "Number of Unique Compounds",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+
+p3
+ggsave("figures/Figure3_chemical_class_composition.png", p3, width = 8, height = 6, dpi = 600)
+```
+```{r}
+#Chemical class summary of tissue 
+unique(chemical_class_summary$tissue)
+
+chemical_class_summary <- gcms %>%
+  mutate(
+    tissue = case_when(
+      str_detect(sample_id, "Leaf") ~ "Leaf",
+      str_detect(sample_id, "Root") ~ "Root",
+      TRUE ~ tissue
+    )
+  ) %>%
+  distinct(tissue, compound_short, chemical_class) %>%
+  count(tissue, chemical_class, name = "unique_compounds")
+
+p3 <- ggplot(
+  chemical_class_summary,
+  aes(x = tissue, y = unique_compounds, fill = chemical_class)
+) +
+  geom_col(color = "black", width = 0.7) +
+  labs(
+    title = "Chemical Class Composition by Leaf and Root Tissue",
+    x = "Tissue",
+    y = "Number of Unique Compounds",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+
+p3
+
+ggsave(
+  "figures/Figure3_chemical_class_composition_leaf_root.png",
+  p3,
+  width = 8,
+  height = 6,
+  dpi = 600
+)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 4: CHEMICAL CLASS PERCENTAGES
+# ============================================================
+
+chemical_class_percent <- chemical_class_summary %>%
+  group_by(tissue) %>%
+  mutate(percent = 100 * unique_compounds / sum(unique_compounds)) %>%
+  ungroup()
+
+write_csv(chemical_class_percent, "tables/chemical_class_percentages.csv")
+
+p4 <- ggplot(chemical_class_percent, aes(x = tissue, y = percent, fill = chemical_class)) +
+  geom_col(color = "black", width = 0.7) +
+  labs(
+    title = "Chemical Class Percentages by Tissue",
+    x = "Tissue",
+    y = "Percent of Unique Compounds",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+
+p4
+ggsave("figures/Figure4_chemical_class_percentages.png", p4, width = 8, height = 6, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 5: PRESENCE/ABSENCE HEATMAP BY TISSUE
+# ============================================================
+
+presence_tissue <- gcms %>%
+  distinct(tissue, compound_short, chemical_class) %>%
+  arrange(chemical_class, compound_short) %>%
+  mutate(compound_short = factor(compound_short, levels = unique(compound_short)))
+
+p5 <- ggplot(presence_tissue, aes(x = tissue, y = compound_short, fill = chemical_class)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  labs(
+    title = "Presence of Putative Compounds in Leaf and Root Tissue",
+    x = "Tissue",
+    y = "Compound",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 11),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p5
+ggsave("figures/Figure5_presence_absence_heatmap_tissue.png", p5, width = 7, height = 10, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 6: SAMPLE-BY-COMPOUND HEATMAP
+# ============================================================
+
+presence_sample <- gcms %>%
+  distinct(sample_id, tissue, compound_short, chemical_class) %>%
+  arrange(chemical_class, compound_short) %>%
+  mutate(compound_short = factor(compound_short, levels = unique(compound_short)))
+
+p6 <- ggplot(presence_sample, aes(x = sample_id, y = compound_short, fill = chemical_class)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  labs(
+    title = "Compound Occurrence Across Individual Samples",
+    x = "Sample",
+    y = "Compound",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(size = 13, face = "bold", angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p6
+ggsave("figures/Figure6_sample_compound_heatmap.png", p6, width = 10, height = 10, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 7: DETECTION FREQUENCY OF COMPOUNDS
+# ============================================================
+
+p7 <- ggplot(compound_detection_counts, aes(x = reorder(compound_short, detections), y = detections, fill = chemical_class)) +
+  geom_col(color = "black") +
+  coord_flip() +
+  labs(
+    title = "Detection Frequency of Putative Compounds",
+    x = "Compound",
+    y = "Number of Detections",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 13),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p7
+ggsave("figures/Figure7_compound_detection_frequency.png", p7, width = 8, height = 8, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 8: R.MATCH SCORES BY COMPOUND
+# ============================================================
+
+rmatch_by_compound <- gcms %>%
+  group_by(compound_short, chemical_class) %>%
+  summarise(
+    mean_r_match = mean(r_match, na.rm = TRUE),
+    max_r_match = max(r_match, na.rm = TRUE),
+    detections = n(),
+    .groups = "drop"
+  )
+
+write_csv(rmatch_by_compound, "tables/rmatch_by_compound.csv")
+
+p8 <- ggplot(rmatch_by_compound, aes(x = max_r_match, y = reorder(compound_short, max_r_match), color = chemical_class)) +
+  geom_point(size = 5) +
+  geom_vline(xintercept = 950, linetype = "dashed", linewidth = 1) +
+  geom_vline(xintercept = 930, linetype = "dashed", linewidth = 1) +
+  geom_vline(xintercept = 900, linetype = "dotted", linewidth = 1) +
+  annotate("text", x = 952, y = 2, label = "Excellent ≥950", hjust = 0, size = 4) +
+  annotate("text", x = 932, y = 4, label = "High ≥930", hjust = 0, size = 4) +
+  annotate("text", x = 902, y = 6, label = "Good ≥900", hjust = 0, size = 4) +
+  labs(
+    title = "Reverse Match Scores for Putative GC-MS Identifications",
+    x = "Maximum R.Match Score",
+    y = "Compound",
+    color = "Chemical Class"
+  ) +
+  xlim(780, 1000) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 13),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p8
+ggsave("figures/Figure8_rmatch_scores_by_compound.png", p8, width = 9, height = 9, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 9: R.MATCH CONFIDENCE BINS
+# ============================================================
+
+rmatch_bins <- gcms %>%
+  mutate(
+    rmatch_bin = case_when(
+      r_match >= 950 ~ "Excellent (≥950)",
+      r_match >= 930 ~ "High (930–949)",
+      r_match >= 900 ~ "Good (900–929)",
+      r_match >= 850 ~ "Moderate (850–899)",
+      TRUE ~ "Tentative (<850)"
+    ),
+    rmatch_bin = factor(
+      rmatch_bin,
+      levels = c(
+        "Excellent (≥950)",
+        "High (930–949)",
+        "Good (900–929)",
+        "Moderate (850–899)",
+        "Tentative (<850)"
+      )
+    )
+  ) %>%
+  count(tissue, rmatch_bin, name = "observations")
+
+write_csv(rmatch_bins, "tables/rmatch_confidence_bins.csv")
+
+p9 <- ggplot(rmatch_bins, aes(x = rmatch_bin, y = observations, fill = tissue)) +
+  geom_col(position = "dodge", color = "black") +
+  labs(
+    title = "Identification Confidence Based on R.Match Score",
+    x = "R.Match Confidence Category",
+    y = "Number of Observations",
+    fill = "Tissue"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(size = 12, face = "bold", angle = 35, hjust = 1),
+    axis.text.y = element_text(size = 13),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p9
+ggsave("figures/Figure9_rmatch_confidence_bins.png", p9, width = 9, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 10: RETENTION TIME DISTRIBUTION
+# ============================================================
+
+p10 <- ggplot(gcms, aes(x = retention_min, fill = tissue)) +
+  geom_density(alpha = 0.4) +
+  labs(
+    title = "Retention Time Distribution of Detected Compounds",
+    x = "Retention Time (min)",
+    y = "Density",
+    fill = "Tissue"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 15),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 14)
+  )
+
+p10
+ggsave("figures/Figure10_retention_time_distribution.png", p10, width = 8, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 11: RETENTION TIME BY CHEMICAL CLASS
+# ============================================================
+
+p11 <- ggplot(gcms, aes(x = chemical_class, y = retention_min, fill = tissue)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(
+    position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.75),
+    size = 2.5,
+    alpha = 0.8
+  ) +
+  labs(
+    title = "Retention Time Patterns by Chemical Class",
+    x = "Chemical Class",
+    y = "Retention Time (min)",
+    fill = "Tissue"
+  ) +
+  theme_bw(base_size = 15) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.x = element_text(size = 12, face = "bold", angle = 35, hjust = 1),
+    axis.text.y = element_text(size = 13),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p11
+ggsave("figures/Figure11_retention_time_by_class.png", p11, width = 9, height = 6, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 12: BUBBLE PLOT OF CHEMICAL CLASS RICHNESS
+# ============================================================
+
+p12 <- ggplot(chemical_class_summary, aes(x = tissue, y = chemical_class, size = unique_compounds, color = chemical_class)) +
+  geom_point(alpha = 0.85) +
+  scale_size(range = c(4, 14)) +
+  labs(
+    title = "Chemical Class Richness by Tissue",
+    x = "Tissue",
+    y = "Chemical Class",
+    size = "Unique Compounds",
+    color = "Chemical Class"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 15, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p12
+ggsave("figures/Figure12_bubble_chemical_class_richness.png", p12, width = 8, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 13: SHARED VS TISSUE-SPECIFIC COMPOUNDS
+# ============================================================
+
+shared_status <- gcms %>%
+  distinct(tissue, compound_short) %>%
+  group_by(compound_short) %>%
+  summarise(
+    tissues_detected = paste(sort(unique(as.character(tissue))), collapse = " + "),
+    n_tissues = n_distinct(tissue),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    status = case_when(
+      tissues_detected == "Leaf" ~ "Leaf only",
+      tissues_detected == "Root" ~ "Root only",
+      n_tissues == 2 ~ "Shared",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  count(status, name = "unique_compounds")
+
+write_csv(shared_status, "tables/shared_vs_tissue_specific_compounds.csv")
+
+p13 <- ggplot(shared_status, aes(x = status, y = unique_compounds, fill = status)) +
+  geom_col(color = "black", width = 0.65) +
+  labs(
+    title = "Shared and Tissue-Specific Putative Compounds",
+    x = "",
+    y = "Number of Unique Compounds",
+    fill = "Category"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text.x = element_text(size = 15, face = "bold"),
+    axis.text.y = element_text(size = 14),
+    legend.position = "none"
+  )
+
+p13
+ggsave("figures/Figure13_shared_vs_tissue_specific.png", p13, width = 7, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 14: MONOTERPENE / SESQUITERPENE / DITERPENOID ONLY
+# ============================================================
+
+terpene_data <- gcms %>%
+  filter(chemical_class %in% c("Monoterpene", "Sesquiterpene", "Putative diterpenoid")) %>%
+  distinct(tissue, compound_short, chemical_class)
+
+terpene_summary <- terpene_data %>%
+  count(tissue, chemical_class, name = "unique_compounds")
+
+write_csv(terpene_summary, "tables/terpene_class_summary.csv")
+
+p14 <- ggplot(terpene_summary, aes(x = chemical_class, y = unique_compounds, fill = tissue)) +
+  geom_col(position = "dodge", color = "black") +
+  labs(
+    title = "Terpene Class Comparison Between Leaf and Root Tissue",
+    x = "Terpene Class",
+    y = "Number of Unique Compounds",
+    fill = "Tissue"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 19, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text.x = element_text(size = 14, face = "bold", angle = 25, hjust = 1),
+    axis.text.y = element_text(size = 14),
+    legend.title = element_text(size = 15, face = "bold"),
+    legend.text = element_text(size = 13)
+  )
+
+p14
+ggsave("figures/Figure14_terpene_class_comparison.png", p14, width = 8, height = 5, dpi = 600)
+```
+
+
+```{r}
+# ============================================================
+# FIGURE 15: COMPOUND DETECTION ACROSS SAMPLES
+# ============================================================
+
+compound_by_sample <- gcms %>%
+  distinct(sample_id, tissue, compound_short, chemical_class) %>%
+  count(compound_short, chemical_class, name = "samples_detected") %>%
+  arrange(desc(samples_detected))
+
+write_csv(compound_by_sample, "tables/compound_detection_across_samples.csv")
+
+p15 <- ggplot(compound_by_sample, aes(x = reorder(compound_short, samples_detected), y = samples_detected, fill = chemical_class)) +
+  geom_col(color = "black") +
+  coord_flip() +
+  labs(
+    title = "Number of Samples in Which Each Compound Was Detected",
+    x = "Compound",
+    y = "Number of Samples",
+    fill = "Chemical Class"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 13),
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12)
+  )
+
+p15
+ggsave("figures/Figure15_compound_detection_across_samples.png", p15, width = 8, height = 8, dpi = 600)
+
+# ============================================================
+# PRINT QUICK SUMMARY TO CONSOLE
+# ============================================================
+
+dataset_summary
+sample_counts
+compound_counts_tissue
+chemical_class_summary
+shared_status
+```
+```{r}
+
+network_data <- metabolites %>%
+  distinct(Tissue, Compound, Class)
+
+ggplot(network_data, aes(x = Tissue, y = reorder(Compound, Class))) +
+  geom_line(aes(group = Compound), color = "grey70", linewidth = 0.8) +
+  geom_point(aes(color = Class), size = 5) +
+  labs(
+    title = "Shared and Tissue-Specific Putative Metabolites",
+    x = "Tissue",
+    y = "Putative Compound",
+    color = "Chemical Class"
+  ) +
+  theme_bw(base_size = 18) +
+  theme(
+    plot.title = element_text(size = 22, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 20, face = "bold"),
+    axis.text.x = element_text(size = 18, face = "bold"),
+    axis.text.y = element_text(size = 14),
+    legend.title = element_text(size = 18, face = "bold"),
+    legend.text = element_text(size = 15)
+  )
+
+ggsave("Figure4_Network_Shared_Tissue_Specific_Metabolites.png", width = 9, height = 10, dpi = 600)
+
+```
+
+
+
+
+
+
+
+
+
+

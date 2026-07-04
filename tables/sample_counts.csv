@@ -1,7 +1,7 @@
-tissue,sample_id,n
-leaf,Leaf1,9
-leaf,Leaf2,7
-leaf,Leaf3,2
-root,Root1,6
-root,Root2,11
-root,Root3,5
+tissue,sample_id,unique_observations
+NA,Leaf1,9
+NA,Leaf2,7
+NA,Leaf3,2
+NA,Root1,6
+NA,Root2,11
+NA,Root3,5

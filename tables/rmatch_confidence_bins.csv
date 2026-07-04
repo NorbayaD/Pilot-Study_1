@@ -1,0 +1,10 @@
+tissue,rmatch_bin,observations
+Leaf,Excellent (≥950),10
+Leaf,High (930–949),5
+Leaf,Good (900–929),2
+Leaf,Moderate (850–899),1
+Root,Excellent (≥950),4
+Root,High (930–949),7
+Root,Good (900–929),3
+Root,Moderate (850–899),3
+Root,Tentative (<850),5

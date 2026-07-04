@@ -1,0 +1,21 @@
+compound_short,chemical_class,mean_r_match,max_r_match,detections
+1-Dodecene,NA,897,897,1
+1-Tetradecene,NA,925,925,1
+"1H-Cyclopenta[1,3]cyclopropa[1,2]benzene",Sesquiterpene,927,927,1
+Abietane/phenanthrene-like,NA,816.5,831,2
+Camphene,Monoterpene,948,948,1
+Caryophyllene,Sesquiterpene,953.6,971,5
+Diterpene-like naphthalene,NA,715,715,1
+Germacrene D,Sesquiterpene,943,962,3
+Humulene,Sesquiterpene,942,942,1
+Kaurene-like diterpene,NA,819,883,2
+Limonene/cyclohexene family,Monoterpene,894,894,1
+Longifolene,Sesquiterpene,940,940,1
+Methyl abietate,NA,830,830,1
+Undecane,NA,941.5,944,2
+iso-Pimaradiene,NA,870,870,1
+α-Phellandrene,Monoterpene,928,928,1
+α-Pinene,Monoterpene,943.6,951,5
+β-Myrcene,Monoterpene,963,965,2
+β-Phellandrene,Monoterpene,945.3333333333334,950,3
+β-Pinene,Monoterpene,958.6,966,5

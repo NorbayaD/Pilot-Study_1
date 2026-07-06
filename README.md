@@ -5,7 +5,7 @@ Objective
 
 Develop a reproducible bioinformatics workflow that links metabolites detected by GC-MS to candidate terpene synthase genes in the Pinus taeda genome.
 
-#Phase I – Candidate Discovery
+##Phase I – Candidate Discovery##
 
 1. Navigate to the downloaded genome directory
 cd "C:\Users\norba\Downloads\ncbi_dataset\ncbi_dataset\data\GCA_000404065.3"

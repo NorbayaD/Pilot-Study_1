@@ -175,25 +175,33 @@ p1
 ggsave("figures/Figure1_unique_observations_per_sample.png", p1, width = 8, height = 5, dpi = 600)
 ```
 
-
 ```{r}
+
 # ============================================================
 # FIGURE 2: UNIQUE COMPOUNDS BY TISSUE
 # ============================================================
 
+gcms <- gcms %>%
+  mutate(
+    tissue = case_when(
+      str_detect(sample_id, "Leaf") ~ "Leaf",
+      str_detect(sample_id, "Root") ~ "Root",
+      TRUE ~ tissue
+    )
+  )
+
+unique(gcms$tissue)
+
 compound_counts_tissue <- gcms %>%
   distinct(tissue, compound_short) %>%
   count(tissue, name = "unique_compounds")
-
-write_csv(compound_counts_tissue, "tables/unique_compounds_by_tissue.csv")
 
 p2 <- ggplot(compound_counts_tissue, aes(x = tissue, y = unique_compounds, fill = tissue)) +
   geom_col(color = "black", width = 0.6) +
   labs(
     title = "Unique Putative Compounds Detected by Tissue",
     x = "Tissue",
-    y = "Number of Unique Compounds",
-    fill = "Tissue"
+    y = "Number of Unique Compounds"
   ) +
   theme_bw(base_size = 16) +
   theme(
@@ -205,6 +213,7 @@ p2 <- ggplot(compound_counts_tissue, aes(x = tissue, y = unique_compounds, fill 
 
 p2
 ggsave("figures/Figure2_unique_compounds_by_tissue.png", p2, width = 7, height = 5, dpi = 600)
+
 ```
 
 
@@ -233,51 +242,7 @@ p3 <- ggplot(chemical_class_summary, aes(x = tissue, y = unique_compounds, fill 
 p3
 ggsave("figures/Figure3_chemical_class_composition.png", p3, width = 8, height = 6, dpi = 600)
 ```
-```{r}
-#Chemical class summary of tissue 
-unique(chemical_class_summary$tissue)
 
-chemical_class_summary <- gcms %>%
-  mutate(
-    tissue = case_when(
-      str_detect(sample_id, "Leaf") ~ "Leaf",
-      str_detect(sample_id, "Root") ~ "Root",
-      TRUE ~ tissue
-    )
-  ) %>%
-  distinct(tissue, compound_short, chemical_class) %>%
-  count(tissue, chemical_class, name = "unique_compounds")
-
-p3 <- ggplot(
-  chemical_class_summary,
-  aes(x = tissue, y = unique_compounds, fill = chemical_class)
-) +
-  geom_col(color = "black", width = 0.7) +
-  labs(
-    title = "Chemical Class Composition by Leaf and Root Tissue",
-    x = "Tissue",
-    y = "Number of Unique Compounds",
-    fill = "Chemical Class"
-  ) +
-  theme_bw(base_size = 16) +
-  theme(
-    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
-    axis.title = element_text(size = 18, face = "bold"),
-    axis.text = element_text(size = 16, face = "bold"),
-    legend.title = element_text(size = 16, face = "bold"),
-    legend.text = element_text(size = 13)
-  )
-
-p3
-
-ggsave(
-  "figures/Figure3_chemical_class_composition_leaf_root.png",
-  p3,
-  width = 8,
-  height = 6,
-  dpi = 600
-)
-```
 
 
 ```{r}
@@ -726,12 +691,12 @@ shared_status
 ```
 ```{r}
 
-network_data <- metabolites %>%
-  distinct(Tissue, Compound, Class)
+network_data <- gcms %>%
+  distinct(tissue, compound_short, chemical_class)
 
-ggplot(network_data, aes(x = Tissue, y = reorder(Compound, Class))) +
-  geom_line(aes(group = Compound), color = "grey70", linewidth = 0.8) +
-  geom_point(aes(color = Class), size = 5) +
+ggplot(network_data, aes(x = tissue, y = reorder(compound_short, chemical_class))) +
+  geom_line(aes(group = compound_short), color = "grey70", linewidth = 0.8) +
+  geom_point(aes(color = chemical_class), size = 5) +
   labs(
     title = "Shared and Tissue-Specific Putative Metabolites",
     x = "Tissue",
@@ -752,12 +717,141 @@ ggsave("Figure4_Network_Shared_Tissue_Specific_Metabolites.png", width = 9, heig
 
 ```
 
+##retention time pattern
+```{r}
+compound_rt <- gcms %>%
+  group_by(tissue, compound_short, chemical_class) %>%
+  summarise(
+    mean_rt = mean(retention_min, na.rm = TRUE),
+    mean_rmatch = mean(r_match, na.rm = TRUE),
+    detections = n(),
+    .groups = "drop"
+  )
+
+p4 <- ggplot(compound_rt,
+             aes(x = mean_rt, y = reorder(compound_short, mean_rt))) +
+  geom_point(aes(color = tissue, size = mean_rmatch), alpha = 0.85) +
+  facet_wrap(~ tissue, nrow = 1) +
+  theme_bw(base_size = 15) +
+  labs(
+    title = "Retention Time Pattern of Putative Compounds by Tissue",
+    x = "Mean Retention Time (min)",
+    y = "Putative Compound",
+    color = "Tissue",
+    size = "Mean R.Match"
+  ) +
+  theme(
+    plot.title = element_text(size = 22, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text.y = element_text(size = 11),
+    strip.text = element_text(size = 16, face = "bold")
+  )
+
+p4
+
+ggsave("figures/Figure4_compound_retention_patterns.png", p4,
+       width = 11, height = 9, dpi = 600)
+```
+
+
+```{r}
+pathway_table <- gcms %>%
+  distinct(tissue, compound_short, chemical_class) %>%
+  mutate(
+    pathway = case_when(
+      chemical_class == "Monoterpene" ~ "MEP → GPP → Monoterpenes",
+      chemical_class == "Sesquiterpene" ~ "MVA → FPP → Sesquiterpenes",
+      str_detect(chemical_class, "Diterpen") ~ "GGPP → Diterpenoids",
+      TRUE ~ "Other / Unknown"
+    )
+  )
+
+p5 <- ggplot(pathway_table,
+             aes(x = pathway, y = compound_short, color = tissue)) +
+  geom_point(size = 4) +
+  theme_bw(base_size = 15) +
+  labs(
+    title = "Detected Putative Metabolites Mapped to Biosynthetic Pathways",
+    x = "Known Biosynthetic Pathway",
+    y = "Putative Compound",
+    color = "Tissue"
+  ) +
+  theme(
+    plot.title = element_text(size = 21, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text.x = element_text(size = 12, angle = 30, hjust = 1),
+    axis.text.y = element_text(size = 11),
+    legend.title = element_text(size = 15, face = "bold")
+  )
+
+p5
+
+ggsave("figures/Figure5_biosynthetic_pathway_mapping.png", p5,
+       width = 11, height = 9, dpi = 600)
+```
 
 
 
+```{r}
+
+```
 
 
+```{r}
+# Venn diagram using only ggplot2/tidyverse
 
+library(tidyverse)
 
+gcms <- read_csv(
+  "C:/Users/norba/Downloads/GCMS_R_Project_Report/GCMS_R_Project/data/gcms_tidy_r_input.csv",
+  show_col_types = FALSE
+)
+
+gcms <- gcms %>%
+  mutate(
+    tissue = str_to_title(tissue),
+    compound_short = str_replace_all(compound_short, "_", "-")
+  )
+
+leaf_compounds <- gcms %>%
+  filter(tissue == "Leaf") %>%
+  distinct(compound_short)
+
+root_compounds <- gcms %>%
+  filter(tissue == "Root") %>%
+  distinct(compound_short)
+
+shared <- intersect(leaf_compounds$compound_short, root_compounds$compound_short)
+leaf_only <- setdiff(leaf_compounds$compound_short, root_compounds$compound_short)
+root_only <- setdiff(root_compounds$compound_short, leaf_compounds$compound_short)
+
+venn_counts <- tibble(
+  category = c("Leaf only", "Shared", "Root only"),
+  count = c(length(leaf_only), length(shared), length(root_only))
+)
+
+print(venn_counts)
+
+p_venn <- ggplot() +
+  annotate("point", x = -0.7, y = 0, size = 95, shape = 21, alpha = 0.25, fill = "pink") +
+  annotate("point", x = 0.7, y = 0, size = 95, shape = 21, alpha = 0.25, fill = "lightblue") +
+  annotate("text", x = -1.25, y = 0, label = length(leaf_only), size = 10, fontface = "bold") +
+  annotate("text", x = 0, y = 0, label = length(shared), size = 10, fontface = "bold") +
+  annotate("text", x = 1.25, y = 0, label = length(root_only), size = 10, fontface = "bold") +
+  annotate("text", x = -0.7, y = 1.1, label = "Leaf", size = 8, fontface = "bold") +
+  annotate("text", x = 0.7, y = 1.1, label = "Root", size = 8, fontface = "bold") +
+  annotate("text", x = -1.25, y = -0.9, label = "Leaf only", size = 5) +
+  annotate("text", x = 0, y = -0.9, label = "Shared", size = 5) +
+  annotate("text", x = 1.25, y = -0.9, label = "Root only", size = 5) +
+  coord_fixed() +
+  theme_void() +
+  labs(title = "Shared and Tissue-Specific Putative Metabolites") +
+  theme(plot.title = element_text(size = 19, face = "bold", hjust = 0.5))
+
+p_venn
+
+ggsave("figures/Figure_Venn_leaf_root_compounds.png", p_venn,
+       width = 8, height = 6, dpi = 600)
+```
 
 

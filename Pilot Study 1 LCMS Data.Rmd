@@ -1,0 +1,2368 @@
+---
+title: "Pilot Study 2 LC-MS Data"
+output: html_document
+date: "2026-08-10"
+---
+
+
+1. Packages
+
+Don't repeatedly run install.packages() every time you knit the document. Install once in the Console if needed:
+
+```{r}
+install.packages(c(
+  "readxl",
+  "dplyr",
+  "tidyr",
+  "stringr",
+  "ggplot2",
+  "ggrepel",
+  "tibble",
+  "pheatmap"
+))
+```
+
+
+
+Then your R Markdown only needs:
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(ggrepel)
+library(tibble)
+library(pheatmap)
+```
+
+
+2. Import positive-mode MS-DIAL data
+
+```{r}
+file_path <- "C:/Users/norba/Downloads/postive mode height.xlsx"
+
+msdial <- read_excel(
+  path = file_path,
+  sheet = "postive mode height",
+  skip = 4
+)
+
+dim(msdial)
+names(msdial)
+```
+
+
+3. Identify sample-intensity columns
+
+These are the columns containing the actual MS-DIAL feature peak heights.
+
+```{r}
+sample_columns <- c(
+  "blank_1", "blank_2", "blank_3", "blank_4",
+  "exudate_1", "exudate_2", "exudate_3",
+  "FC_1", "FC_2", "FC_3",
+  "fungi_old_1", "fungi_old_2", "fungi_old_3",
+  "leaf_1", "leaf_2", "leaf_3",
+  "new_in_P08", "new_in_P09", "new_in_P10",
+  "new_out_P08", "new_out_P09", "new_out_P10",
+  "root_1", "root_2", "root_3",
+  "Soil_control_1", "Soil_control_2", "Soil_control_3"
+)
+```
+
+
+
+Safety check:
+
+```{r}
+stopifnot(
+  all(sample_columns %in% names(msdial))
+)
+```
+
+
+
+There should be 28 injections total:
+
+```{r}
+length(sample_columns)
+
+```
+
+
+4. Make sure intensities are numeric
+
+```{r}
+msdial <- msdial %>%
+  mutate(
+    across(
+      all_of(sample_columns),
+      as.numeric
+    )
+  )
+```
+
+
+Check:
+
+```{r}
+sapply(
+  msdial[, sample_columns],
+  class
+)
+```
+
+
+These should be numeric.
+
+5. Create sample metadata
+
+This tells R what each sample actually represents biologically.
+
+```{r}
+sample_metadata <- tibble(
+  sample = sample_columns
+) %>%
+  mutate(
+
+    group = case_when(
+      str_detect(sample, "^blank") ~
+        "Blank",
+
+      str_detect(sample, "^exudate") ~
+        "Plant-soil exudate",
+
+      str_detect(sample, "^Soil_control") ~
+        "Soil control",
+
+      str_detect(sample, "^FC") ~
+        "Fungal control",
+
+      str_detect(sample, "^fungi_old") ~
+        "Fungi old",
+
+      str_detect(sample, "^leaf") ~
+        "Leaf",
+
+      str_detect(sample, "^root") ~
+        "Root",
+
+      str_detect(sample, "^new_in") ~
+        "Fungal agar in",
+
+      str_detect(sample, "^new_out") ~
+        "Fungal agar out",
+
+      TRUE ~ "Unknown"
+    ),
+
+    replicate = case_when(
+      str_detect(sample, "P08") ~ "1",
+      str_detect(sample, "P09") ~ "2",
+      str_detect(sample, "P10") ~ "3",
+
+      TRUE ~
+        str_extract(sample, "\\d+$")
+    ),
+
+    broad_matrix = case_when(
+
+      group %in% c(
+        "Plant-soil exudate",
+        "Soil control"
+      ) ~ "Soil extract",
+
+      group %in% c(
+        "Fungal control",
+        "Fungi old",
+        "Fungal agar in",
+        "Fungal agar out"
+      ) ~ "Fungal agar",
+
+      group %in% c(
+        "Leaf",
+        "Root"
+      ) ~ "Plant tissue",
+
+      group == "Blank" ~
+        "Blank",
+
+      TRUE ~ "Unknown"
+    )
+  )
+
+```
+
+
+Check it:
+
+```{r}
+sample_metadata
+```
+
+
+
+And:
+
+```{r}
+sample_metadata %>%
+  count(group)
+```
+
+
+You expect eight biological groups with three replicates each, plus four blanks. Your original metadata assignment already establishes these groups.
+
+6. Initial sample-level QC
+
+Here we haven't filtered anything yet.
+
+Calculate:
+
+number of features with nonzero peak height;
+sum of detected MS-DIAL feature peak heights.
+sum of MS-DIAL feature peak heights, not the raw LC-MS total ion chromatogram.
+
+```{r}
+sample_qc <- tibble(
+
+  sample = sample_columns,
+
+  summed_feature_intensity = colSums(
+    as.matrix(
+      msdial[, sample_columns]
+    ),
+    na.rm = TRUE
+  ),
+
+  detected_features = colSums(
+    as.matrix(
+      msdial[, sample_columns]
+    ) > 0,
+    na.rm = TRUE
+  )
+
+) %>%
+  left_join(
+    sample_metadata,
+    by = "sample"
+  )
+
+sample_qc
+```
+
+
+
+
+7. Find failed/empty injections
+```{r}
+sample_qc %>%
+  filter(
+    detected_features == 0 |
+      summed_feature_intensity == 0
+  )
+```
+
+
+
+
+8. Plot summed feature signal
+```{r}
+signal_plot <- ggplot(
+  sample_qc,
+  aes(
+    x = reorder(
+      sample,
+      summed_feature_intensity
+    ),
+    y = summed_feature_intensity,
+    fill = group
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title =
+      "Sum of detected positive-mode LC-MS feature intensities",
+    x = NULL,
+    y =
+      "Sum of MS-DIAL feature peak heights",
+    fill = "Sample group"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "bottom"
+  )
+
+signal_plot
+```
+
+
+9. Plot number of detected features
+
+```{r}
+feature_count_plot <- ggplot(
+  sample_qc,
+  aes(
+    x = reorder(
+      sample,
+      detected_features
+    ),
+    y = detected_features,
+    fill = group
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title =
+      "Detected positive-mode LC-MS features per sample",
+    x = NULL,
+    y =
+      "Features with peak height > 0",
+    fill =
+      "Sample group"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "bottom"
+  )
+
+feature_count_plot
+```
+
+
+10. Calculate replicate QC and CV
+```{r}
+group_qc_summary <- sample_qc %>%
+  filter(
+    sample != "blank_4"
+  ) %>%
+  group_by(group) %>%
+  summarise(
+
+    n = n(),
+
+    mean_features =
+      mean(detected_features),
+
+    sd_features =
+      sd(detected_features),
+
+    feature_CV_percent =
+      100 *
+      sd(detected_features) /
+      mean(detected_features),
+
+    mean_summed_signal =
+      mean(summed_feature_intensity),
+
+    sd_summed_signal =
+      sd(summed_feature_intensity),
+
+    signal_CV_percent =
+      100 *
+      sd(summed_feature_intensity) /
+      mean(summed_feature_intensity),
+
+    .groups = "drop"
+  )
+
+group_qc_summary
+```
+
+
+
+11. Build the quantitative feature table
+
+Now we shift from:
+
+What does each sample look like overall?
+
+to:
+
+What happened to each individual LC-MS feature?
+
+I would keep more annotation information now because we'll need it later.
+
+```{r}
+feature_table <- msdial %>%
+  select(
+
+    `Alignment ID`,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `Post curation result`,
+    `Fill %`,
+    `MS/MS assigned`,
+
+    any_of(c(
+      "Reference RT",
+      "Reference m/z",
+      "Formula",
+      "Ontology",
+      "INCHIKEY",
+      "SMILES",
+      "Annotation tag (VS1.0)",
+      "RT matched",
+      "m/z matched",
+      "MS/MS matched",
+      "Total score",
+      "RT similarity",
+      "Dot product",
+      "Reverse dot product",
+      "Fragment presence %",
+      "S/N average"
+    )),
+
+    all_of(sample_columns)
+  )
+```
+
+
+12. Give every feature a readable unique name
+```{r}
+feature_table <- feature_table %>%
+  mutate(
+
+    feature_name = paste0(
+
+      "F",
+      `Alignment ID`,
+
+      "_mz",
+      round(
+        `Average Mz`,
+        4
+      ),
+
+      "_rt",
+      round(
+        `Average Rt(min)`,
+        2
+      )
+    )
+  )
+```
+
+
+
+Example:
+
+F1540_mz187.1078_rt0.74
+
+means:
+
+MS-DIAL Alignment ID = 1540
+m/z ≈ 187.1078
+RT ≈ 0.74 min
+
+
+13. Define usable blanks and biological samples
+```{r}
+valid_blank_columns <- c(
+  "blank_1",
+  "blank_2",
+  "blank_3"
+)
+
+biological_columns <- setdiff(
+  sample_columns,
+  c(
+    valid_blank_columns,
+    "blank_4"
+  )
+)
+```
+
+
+
+Check:
+
+```{r}
+length(biological_columns)
+```
+
+
+
+14. Calculate blank/background information for every feature
+
+```{r}
+feature_qc <- feature_table %>%
+  mutate(
+
+    blank_mean = rowMeans(
+      across(
+        all_of(valid_blank_columns)
+      ),
+      na.rm = TRUE
+    ),
+
+    maximum_biological_signal = apply(
+      as.matrix(
+        pick(
+          all_of(biological_columns)
+        )
+      ),
+      1,
+      max,
+      na.rm = TRUE
+    ),
+
+    sample_to_blank_ratio =
+      (
+        maximum_biological_signal + 1
+      ) /
+      (
+        blank_mean + 1
+      )
+  )
+```
+
+
+15. Examine different blank thresholds
+
+Before filtering, save a copy:
+
+```{r}
+feature_qc_unfiltered <- feature_qc
+```
+
+
+
+
+Then compare 3×, 5× and 10×:
+
+```{r}
+blank_filter_summary <- tibble(
+
+  threshold = c(
+    "3x",
+    "5x",
+    "10x"
+  ),
+
+  retained_features = c(
+
+    sum(
+      feature_qc_unfiltered$
+        sample_to_blank_ratio >= 3,
+      na.rm = TRUE
+    ),
+
+    sum(
+      feature_qc_unfiltered$
+        sample_to_blank_ratio >= 5,
+      na.rm = TRUE
+    ),
+
+    sum(
+      feature_qc_unfiltered$
+        sample_to_blank_ratio >= 10,
+      na.rm = TRUE
+    )
+  )
+)
+
+blank_filter_summary
+
+```
+
+
+For our main exploratory analysis:
+
+```{r}
+feature_qc <- feature_qc_unfiltered %>%
+  filter(
+    sample_to_blank_ratio >= 5
+  )
+```
+
+
+
+This preserves the 5× choice you've already used.
+
+16. Group-aware prevalence filter
+
+```{r}
+group_columns <- list(
+
+  exudate = c(
+    "exudate_1",
+    "exudate_2",
+    "exudate_3"
+  ),
+
+  fungal_control = c(
+    "FC_1",
+    "FC_2",
+    "FC_3"
+  ),
+
+  fungi_old = c(
+    "fungi_old_1",
+    "fungi_old_2",
+    "fungi_old_3"
+  ),
+
+  leaf = c(
+    "leaf_1",
+    "leaf_2",
+    "leaf_3"
+  ),
+
+  fungal_agar_in = c(
+    "new_in_P08",
+    "new_in_P09",
+    "new_in_P10"
+  ),
+
+  fungal_agar_out = c(
+    "new_out_P08",
+    "new_out_P09",
+    "new_out_P10"
+  ),
+
+  root = c(
+    "root_1",
+    "root_2",
+    "root_3"
+  ),
+
+  soil_control = c(
+    "Soil_control_1",
+    "Soil_control_2",
+    "Soil_control_3"
+  )
+)
+
+```
+
+The group-specific rule is better.
+
+
+Calculate detection:
+
+```{r}
+presence_by_group <- sapply(
+
+  group_columns,
+
+  function(cols) {
+
+    rowSums(
+      as.matrix(
+        feature_qc[, cols]
+      ) > 0,
+      na.rm = TRUE
+    ) >= 2
+  }
+)
+```
+
+
+
+Keep features detected in at least 2 of 3 replicates in at least one biological group:
+
+```{r}
+feature_qc$present_in_any_group <-
+  apply(
+    presence_by_group,
+    1,
+    any
+  )
+
+feature_qc <- feature_qc %>%
+  filter(
+    present_in_any_group
+  )
+```
+
+
+
+Now calculate overall detection count just for reporting:
+
+```{r}
+feature_qc <- feature_qc %>%
+  mutate(
+
+    number_detected = rowSums(
+
+      across(
+        all_of(biological_columns),
+        ~ .x > 0
+      ),
+
+      na.rm = TRUE
+    )
+  )
+```
+
+
+
+Check filtering:
+
+```{r}
+nrow(feature_table)
+nrow(feature_qc)
+```
+
+
+
+17. Build the PCA intensity matrix
+
+
+```{r}
+intensity_matrix <- feature_qc %>%
+  select(
+    feature_name,
+    all_of(biological_columns)
+  ) %>%
+  column_to_rownames(
+    "feature_name"
+  ) %>%
+  as.matrix()
+
+```
+
+
+Transpose:
+
+```{r}
+pca_matrix_raw <- t(
+  intensity_matrix
+)
+
+dim(pca_matrix_raw)
+```
+
+
+
+Now:
+
+rows = samples
+columns = LC-MS features.
+
+18. Replace zeros
+
+For PCA only, replace zeros/missing values with half of that feature's smallest positive measurement.
+```{r}
+replace_zero_half_min <- function(x) {
+
+  positive_values <-
+    x[
+      x > 0 &
+        is.finite(x)
+    ]
+
+  if (
+    length(positive_values) == 0
+  ) {
+
+    return(
+      rep(
+        NA_real_,
+        length(x)
+      )
+    )
+  }
+
+  replacement <-
+    min(positive_values) / 2
+
+  x[
+    x == 0 |
+      is.na(x)
+  ] <- replacement
+
+  x
+}
+
+```
+
+
+Apply:
+
+```{r}
+pca_matrix_imputed <- apply(
+  pca_matrix_raw,
+  2,
+  replace_zero_half_min
+)
+```
+
+
+
+Remove anything that still cannot be analyzed:
+
+```{r}
+pca_matrix_imputed <-
+  pca_matrix_imputed[
+    ,
+    colSums(
+      is.na(
+        pca_matrix_imputed
+      )
+    ) == 0,
+    drop = FALSE
+  ]
+```
+
+
+19. Median normalize
+
+We're choosing one normalization method for this pipeline.
+
+Your previous code calculated median normalization and TIC normalization but then only used median normalization.
+
+So remove the unused TIC block.
+
+```{r}
+sample_medians <- apply(
+  pca_matrix_imputed,
+  1,
+  median,
+  na.rm = TRUE
+)
+
+global_median <-
+  median(
+    sample_medians
+  )
+
+pca_matrix_normalized <- sweep(
+  pca_matrix_imputed,
+  1,
+  sample_medians,
+  "/"
+) * global_median
+```
+
+
+20. Log2 transformation
+
+```{r}
+pca_matrix_log <- log2(
+  pca_matrix_normalized + 1
+)
+```
+
+
+21. Remove zero-variance features
+
+```{r}
+feature_variance <- apply(
+  pca_matrix_log,
+  2,
+  var,
+  na.rm = TRUE
+)
+
+keep_variable_features <-
+  is.finite(
+    feature_variance
+  ) &
+  feature_variance > 0
+
+pca_matrix_log <-
+  pca_matrix_log[
+    ,
+    keep_variable_features,
+    drop = FALSE
+  ]
+```
+
+
+22. Run broad PCA
+
+```{r}
+pca_result <- prcomp(
+  pca_matrix_log,
+  center = TRUE,
+  scale. = TRUE
+)
+
+summary(pca_result)
+```
+
+
+23. Variance explained
+```{r}
+variance_explained <-
+  (
+    pca_result$sdev^2 /
+      sum(
+        pca_result$sdev^2
+      )
+  ) * 100
+
+variance_explained[1:10]
+```
+
+
+
+Create table:
+
+```{r}
+variance_table <- tibble(
+
+  PC = paste0(
+    "PC",
+    seq_along(
+      variance_explained
+    )
+  ),
+
+  variance_percent =
+    variance_explained,
+
+  cumulative_percent =
+    cumsum(
+      variance_explained
+    )
+)
+
+head(
+  variance_table,
+  10
+)
+```
+
+
+24. PCA sample scores
+
+```{r}
+pca_scores <-
+  as.data.frame(
+    pca_result$x
+  ) %>%
+  rownames_to_column(
+    "sample"
+  ) %>%
+  left_join(
+    sample_metadata,
+    by = "sample"
+  )
+```
+
+
+  
+25. Broad PC1 versus PC2 plot
+
+```{r}
+broad_pca_plot <- ggplot(
+  pca_scores,
+  aes(
+    x = PC1,
+    y = PC2,
+    fill = group,
+    shape = broad_matrix
+  )
+) +
+  geom_point(
+    size = 4,
+    color = "black"
+  ) +
+  geom_text_repel(
+    aes(label = sample),
+    size = 3,
+    max.overlaps = Inf
+  ) +
+  labs(
+
+    title =
+      "PCA of positive-mode LC-MS features",
+
+    subtitle =
+      "5× blank-filtered, median-normalized and log2-transformed",
+
+    x = paste0(
+      "PC1 (",
+      round(
+        variance_explained[1],
+        1
+      ),
+      "%)"
+    ),
+
+    y = paste0(
+      "PC2 (",
+      round(
+        variance_explained[2],
+        1
+      ),
+      "%)"
+    ),
+
+    fill =
+      "Sample group",
+
+    shape =
+      "Sample matrix"
+  ) +
+  theme_classic()
+
+broad_pca_plot
+```
+
+
+26. PC1 vs PC3
+```{r}
+pc1_pc3_plot <- ggplot(
+  pca_scores,
+  aes(
+    x = PC1,
+    y = PC3,
+    fill = group,
+    shape = broad_matrix
+  )
+) +
+  geom_point(
+    size = 4,
+    color = "black"
+  ) +
+  geom_text_repel(
+    aes(label = sample),
+    size = 3,
+    max.overlaps = Inf
+  ) +
+  labs(
+
+    title =
+      "PCA: PC1 versus PC3",
+
+    x = paste0(
+      "PC1 (",
+      round(
+        variance_explained[1],
+        1
+      ),
+      "%)"
+    ),
+
+    y = paste0(
+      "PC3 (",
+      round(
+        variance_explained[3],
+        1
+      ),
+      "%)"
+    )
+  ) +
+  theme_classic()
+
+pc1_pc3_plot
+```
+
+
+27. Scree plot
+
+```{r}
+scree_plot <- variance_table %>%
+  slice_head(
+    n = 15
+  ) %>%
+  ggplot(
+    aes(
+      x = factor(
+        PC,
+        levels = PC
+      ),
+      y = variance_percent,
+      group = 1
+    )
+  ) +
+  geom_col() +
+  geom_point() +
+  geom_line() +
+  labs(
+    title =
+      "Positive-mode PCA scree plot",
+    x =
+      "Principal component",
+    y =
+      "Variance explained (%)"
+  ) +
+  theme_classic()
+
+scree_plot
+```
+
+
+28. Create reusable focused-PCA function
+
+Instead of repeating the same code three times:
+```{r}
+run_focused_pca <- function(
+    groups_to_use,
+    title_text
+) {
+
+  samples_to_use <-
+    sample_metadata %>%
+    filter(
+      group %in% groups_to_use
+    ) %>%
+    pull(sample)
+
+  matrix_subset <-
+    pca_matrix_log[
+      samples_to_use,
+      ,
+      drop = FALSE
+    ]
+
+  variances <- apply(
+    matrix_subset,
+    2,
+    var,
+    na.rm = TRUE
+  )
+
+  matrix_subset <-
+    matrix_subset[
+      ,
+      is.finite(variances) &
+        variances > 0,
+      drop = FALSE
+    ]
+
+  result <- prcomp(
+    matrix_subset,
+    center = TRUE,
+    scale. = TRUE
+  )
+
+  variance <-
+    (
+      result$sdev^2 /
+        sum(
+          result$sdev^2
+        )
+    ) * 100
+
+  scores <-
+    as.data.frame(
+      result$x
+    ) %>%
+    rownames_to_column(
+      "sample"
+    ) %>%
+    left_join(
+      sample_metadata,
+      by = "sample"
+    )
+
+  plot <- ggplot(
+    scores,
+    aes(
+      x = PC1,
+      y = PC2,
+      fill = group
+    )
+  ) +
+    geom_point(
+      shape = 21,
+      size = 5,
+      color = "black"
+    ) +
+    geom_text_repel(
+      aes(label = sample)
+    ) +
+    labs(
+      title = title_text,
+
+      x = paste0(
+        "PC1 (",
+        round(
+          variance[1],
+          1
+        ),
+        "%)"
+      ),
+
+      y = paste0(
+        "PC2 (",
+        round(
+          variance[2],
+          1
+        ),
+        "%)"
+      )
+    ) +
+    theme_classic()
+
+  list(
+    pca = result,
+    scores = scores,
+    variance = variance,
+    plot = plot
+  )
+}
+```
+
+
+29. Exudate versus soil PCA
+```{r}
+exudate_soil_pca <-
+  run_focused_pca(
+    groups_to_use = c(
+      "Plant-soil exudate",
+      "Soil control"
+    ),
+    title_text =
+      "PCA: plant-soil exudate versus soil control"
+  )
+
+exudate_soil_pca$plot
+```
+
+
+30. Fungal agar PCA
+
+
+```{r}
+fungal_pca <-
+  run_focused_pca(
+    groups_to_use = c(
+      "Fungal control",
+      "Fungal agar in",
+      "Fungal agar out"
+    ),
+    title_text =
+      "PCA of fungal agar samples"
+  )
+
+fungal_pca$plot
+```
+
+
+31. Leaf versus root PCA
+
+```{r}
+tissue_pca <-
+  run_focused_pca(
+    groups_to_use = c(
+      "Leaf",
+      "Root"
+    ),
+    title_text =
+      "PCA of leaf and root extracts"
+  )
+
+tissue_pca$plot
+```
+
+
+32. Extract PCA loadings
+
+```{r}
+pca_loadings <-
+  as.data.frame(
+    pca_result$rotation
+  ) %>%
+  rownames_to_column(
+    "feature_name"
+  )
+```
+
+
+
+Create annotation table:
+
+```{r}
+feature_annotations <- feature_qc %>%
+  select(
+    feature_name,
+    `Alignment ID`,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `Post curation result`,
+    `Fill %`,
+    `MS/MS assigned`,
+    any_of(c(
+      "Formula",
+      "Ontology",
+      "INCHIKEY",
+      "SMILES",
+      "Annotation tag (VS1.0)",
+      "RT matched",
+      "m/z matched",
+      "MS/MS matched",
+      "Total score",
+      "RT similarity",
+      "Dot product",
+      "Reverse dot product",
+      "Fragment presence %",
+      "S/N average"
+    )),
+    blank_mean,
+    sample_to_blank_ratio,
+    number_detected
+  )
+```
+
+
+Join:
+
+
+```{r}
+pca_loadings <- pca_loadings %>%
+  left_join(
+    feature_annotations,
+    by = "feature_name"
+  )
+```
+
+
+33. Identify strongest PC1, PC2 and PC3 features
+
+Reusable function:
+
+```{r}
+get_top_loadings <- function(
+    loading_table,
+    pc_column,
+    number_to_keep = 30
+) {
+
+  loading_table %>%
+    mutate(
+      selected_loading =
+        .data[[pc_column]],
+
+      absolute_loading =
+        abs(
+          .data[[pc_column]]
+        )
+    ) %>%
+    arrange(
+      desc(
+        absolute_loading
+      )
+    ) %>%
+    slice_head(
+      n = number_to_keep
+    )
+}
+```
+
+
+
+Run:
+
+```{r}
+
+top_pc1_loadings <-
+  get_top_loadings(
+    pca_loadings,
+    "PC1"
+  )
+
+top_pc2_loadings <-
+  get_top_loadings(
+    pca_loadings,
+    "PC2"
+  )
+
+top_pc3_loadings <-
+  get_top_loadings(
+    pca_loadings,
+    "PC3"
+  )
+
+```
+
+Inspect:
+
+```{r}
+top_pc1_loadings %>%
+  select(
+    feature_name,
+    PC1,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    `Total score`,
+    sample_to_blank_ratio
+  )
+```
+
+
+
+And:
+
+```{r}
+top_pc2_loadings %>%
+  select(
+    feature_name,
+    PC2,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    `Total score`,
+    sample_to_blank_ratio
+  )
+```
+
+
+34. Check suspicious very-early RT loadings
+
+This is important because we previously noticed many high-loading features around RT 0.4–0.8 min.
+
+Don't automatically delete them yet.
+
+Quantify them first:
+
+```{r}
+pca_loadings %>%
+  mutate(
+    important_PC12 =
+      pmax(
+        abs(PC1),
+        abs(PC2)
+      )
+  ) %>%
+  arrange(
+    desc(
+      important_PC12
+    )
+  ) %>%
+  slice_head(
+    n = 100
+  ) %>%
+  count(
+    early_RT =
+      `Average Rt(min)` < 1
+  )
+
+```
+
+
+And inspect:
+
+```{r}
+pca_loadings %>%
+  filter(
+    `Average Rt(min)` < 1
+  ) %>%
+  arrange(
+    desc(
+      abs(PC1)
+    )
+  ) %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    PC1,
+    PC2,
+    sample_to_blank_ratio
+  ) %>%
+  head(30)
+```
+
+
+
+This should happen before interpreting PCA-driving metabolites.
+
+35. Create combined PCA candidate table
+
+```{r}
+important_pca_features <-
+  pca_loadings %>%
+  mutate(
+
+    maximum_absolute_loading =
+      pmax(
+        abs(PC1),
+        abs(PC2),
+        abs(PC3),
+        na.rm = TRUE
+      )
+
+  ) %>%
+  arrange(
+    desc(
+      maximum_absolute_loading
+    )
+  )
+
+```
+
+
+Inspect top 50:
+
+```{r}
+important_pca_features %>%
+  slice_head(
+    n = 50
+  )
+```
+
+
+36. PCA feature heatmap
+
+Since the annotated pheatmap continues to fail and the unannotated version works, leave the annotation problem alone for now. It is not blocking the analysis.
+
+```{r}
+top_feature_names <-
+  important_pca_features %>%
+  slice_head(
+    n = 30
+  ) %>%
+  pull(
+    feature_name
+  )
+
+heatmap_matrix <-
+  t(
+    pca_matrix_log[
+      ,
+      top_feature_names,
+      drop = FALSE
+    ]
+  )
+
+```
+
+
+Plot:
+```{r}
+pheatmap(
+  heatmap_matrix,
+  scale = "row",
+  clustering_distance_rows =
+    "euclidean",
+  clustering_distance_cols =
+    "euclidean",
+  clustering_method =
+    "complete",
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  fontsize_row = 7,
+  fontsize_col = 8,
+  main =
+    "Top features driving positive-mode PCA"
+)
+
+```
+
+
+Your previous unannotated heatmap is the one that successfully rendered.
+
+
+37. Presence/absence analysis across biological groups
+
+Use feature_qc, not the imputed PCA matrix. Presence/absence must be based on actual observed peak heights.
+
+First define all sample groups:
+
+# ------------------------------------------------------------
+# PRESENCE / ABSENCE ANALYSIS
+# ------------------------------------------------------------
+
+# Define sample columns for each biological group
+
+
+```{r}
+presence_groups <- list(
+
+  Exudate = c(
+    "exudate_1",
+    "exudate_2",
+    "exudate_3"
+  ),
+
+  Soil = c(
+    "Soil_control_1",
+    "Soil_control_2",
+    "Soil_control_3"
+  ),
+
+  Leaf = c(
+    "leaf_1",
+    "leaf_2",
+    "leaf_3"
+  ),
+
+  Root = c(
+    "root_1",
+    "root_2",
+    "root_3"
+  ),
+
+  Fungal_in = c(
+    "new_in_P08",
+    "new_in_P09",
+    "new_in_P10"
+  ),
+
+  Fungal_out = c(
+    "new_out_P08",
+    "new_out_P09",
+    "new_out_P10"
+  ),
+
+  Fungal_control = c(
+    "FC_1",
+    "FC_2",
+    "FC_3"
+  ),
+
+  Fungi_old = c(
+    "fungi_old_1",
+    "fungi_old_2",
+    "fungi_old_3"
+  )
+)
+```
+
+
+38. Function for any pairwise presence/absence comparison
+
+We'll define a feature as present when it occurs in at least 2 of 3 biological replicates.
+
+```{r}
+run_presence_comparison <- function(
+    data,
+    group1_cols,
+    group2_cols,
+    group1_name,
+    group2_name,
+    min_replicates = 2
+) {
+
+  result <- data %>%
+    mutate(
+
+      group1_detected_n = rowSums(
+        across(
+          all_of(group1_cols),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+      group2_detected_n = rowSums(
+        across(
+          all_of(group2_cols),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+      group1_present =
+        group1_detected_n >= min_replicates,
+
+      group2_present =
+        group2_detected_n >= min_replicates,
+
+      presence_category = case_when(
+
+        group1_present &
+          group2_present ~
+          "Shared",
+
+        group1_present &
+          !group2_present ~
+          paste0(
+            group1_name,
+            " only"
+          ),
+
+        !group1_present &
+          group2_present ~
+          paste0(
+            group2_name,
+            " only"
+          ),
+
+        TRUE ~
+          "Neither consistently detected"
+      )
+    )
+
+  summary <- result %>%
+    count(
+      presence_category
+    ) %>%
+    mutate(
+
+      percent =
+        100 * n / sum(n),
+
+      comparison =
+        paste0(
+          group1_name,
+          " vs ",
+          group2_name
+        )
+    ) %>%
+    select(
+      comparison,
+      presence_category,
+      n,
+      percent
+    )
+
+  return(
+    list(
+      feature_table = result,
+      summary = summary
+    )
+  )
+}
+```
+
+
+39. Exudate vs soil
+
+This asks:
+
+Which features appear with the plant-containing soil extraction compared with soil alone?
+
+```{r}
+presence_exudate_soil <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Exudate,
+
+    group2_cols =
+      presence_groups$Soil,
+
+    group1_name =
+      "Exudate",
+
+    group2_name =
+      "Soil"
+  )
+
+presence_exudate_soil$summary
+```
+
+
+40. Leaf vs root
+
+This asks:
+
+Which features are shared between aboveground and belowground plant tissue, and which are tissue-associated?
+
+```{r}
+presence_leaf_root <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Leaf,
+
+    group2_cols =
+      presence_groups$Root,
+
+    group1_name =
+      "Leaf",
+
+    group2_name =
+      "Root"
+  )
+
+presence_leaf_root$summary
+```
+
+
+41. Exudate vs root
+
+Yes, I definitely want this comparison.
+
+It asks:
+
+Which features detected in roots are also detectable in the plant-soil extract?
+
+```{r}
+presence_exudate_root <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Exudate,
+
+    group2_cols =
+      presence_groups$Root,
+
+    group1_name =
+      "Exudate",
+
+    group2_name =
+      "Root"
+  )
+
+presence_exudate_root$summary
+```
+
+
+
+A feature classified as:
+
+Shared
+
+means it occurred in ≥2/3 exudates and ≥2/3 roots.
+
+That is potentially interesting.
+
+But:
+
+shared ≠ secreted.
+
+It only establishes chemical correspondence at the aligned-feature level.
+
+42. Exudate vs leaf
+
+This comparison is also worthwhile:
+
+```{r}
+presence_exudate_leaf <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Exudate,
+
+    group2_cols =
+      presence_groups$Leaf,
+
+    group1_name =
+      "Exudate",
+
+    group2_name =
+      "Leaf"
+  )
+
+presence_exudate_leaf$summary
+```
+
+
+
+This can help distinguish whether exudate-associated signals resemble general plant chemistry or are more strongly associated with roots.
+
+43. Fungal agar in vs out
+
+```{r}
+presence_fungal_in_out <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Fungal_in,
+
+    group2_cols =
+      presence_groups$Fungal_out,
+
+    group1_name =
+      "Fungal in",
+
+    group2_name =
+      "Fungal out"
+  )
+
+presence_fungal_in_out$summary
+```
+
+
+44. Fungal agar in vs agar control
+
+```{r}
+presence_fungal_in_control <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Fungal_in,
+
+    group2_cols =
+      presence_groups$Fungal_control,
+
+    group1_name =
+      "Fungal in",
+
+    group2_name =
+      "Fungal control"
+  )
+
+presence_fungal_in_control$summary
+```
+
+
+45. Fungal agar out vs agar control
+
+I would add this too.
+
+It tells us whether the region outside visible fungal growth has nevertheless been chemically altered relative to the control.
+
+```{r}
+presence_fungal_out_control <-
+  run_presence_comparison(
+
+    data = feature_qc,
+
+    group1_cols =
+      presence_groups$Fungal_out,
+
+    group2_cols =
+      presence_groups$Fungal_control,
+
+    group1_name =
+      "Fungal out",
+
+    group2_name =
+      "Fungal control"
+  )
+
+presence_fungal_out_control$summary
+```
+
+
+
+That could actually be biologically interesting if diffusible metabolites extend beyond the visible colony.
+
+46. Combine all pairwise presence results
+
+```{r}
+presence_summary_all <- bind_rows(
+
+  presence_exudate_soil$summary,
+
+  presence_leaf_root$summary,
+
+  presence_exudate_root$summary,
+
+  presence_exudate_leaf$summary,
+
+  presence_fungal_in_out$summary,
+
+  presence_fungal_in_control$summary,
+
+  presence_fungal_out_control$summary
+)
+
+presence_summary_all
+
+```
+
+
+Sort it:
+
+```{r}
+presence_summary_all <- presence_summary_all %>%
+  arrange(
+    comparison,
+    desc(n)
+  )
+
+presence_summary_all
+```
+
+
+
+Save:
+
+```{r}
+
+write.csv(
+  presence_summary_all,
+  "positive_mode_presence_absence_summary.csv",
+  row.names = FALSE
+)
+```
+
+47. Now do the more interesting three-way plant analysis
+
+Pairwise comparisons are useful, but what you're proposing is actually better expressed as:
+
+Which features occur across leaf → root → exudate?
+
+Let's calculate presence in all three.
+
+```{r}
+plant_compartment_presence <- feature_qc %>%
+  mutate(
+
+    leaf_detected_n =
+      rowSums(
+        across(
+          all_of(
+            presence_groups$Leaf
+          ),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    root_detected_n =
+      rowSums(
+        across(
+          all_of(
+            presence_groups$Root
+          ),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    exudate_detected_n =
+      rowSums(
+        across(
+          all_of(
+            presence_groups$Exudate
+          ),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    soil_detected_n =
+      rowSums(
+        across(
+          all_of(
+            presence_groups$Soil
+          ),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    leaf_present =
+      leaf_detected_n >= 2,
+
+    root_present =
+      root_detected_n >= 2,
+
+    exudate_present =
+      exudate_detected_n >= 2,
+
+    soil_present =
+      soil_detected_n >= 2
+  )
+```
+
+
+48. Classify plant-compartment patterns
+```{r}
+plant_compartment_presence <-
+  plant_compartment_presence %>%
+  mutate(
+
+    plant_pattern =
+      case_when(
+
+        leaf_present &
+          root_present &
+          exudate_present ~
+          "Leaf + Root + Exudate",
+
+        !leaf_present &
+          root_present &
+          exudate_present ~
+          "Root + Exudate",
+
+        leaf_present &
+          !root_present &
+          exudate_present ~
+          "Leaf + Exudate",
+
+        leaf_present &
+          root_present &
+          !exudate_present ~
+          "Leaf + Root",
+
+        leaf_present &
+          !root_present &
+          !exudate_present ~
+          "Leaf only",
+
+        !leaf_present &
+          root_present &
+          !exudate_present ~
+          "Root only",
+
+        !leaf_present &
+          !root_present &
+          exudate_present ~
+          "Exudate only",
+
+        TRUE ~
+          "None consistently detected"
+      )
+  )
+```
+
+
+
+Summarize:
+
+```{r}
+plant_pattern_summary <-
+  plant_compartment_presence %>%
+  count(
+    plant_pattern,
+    sort = TRUE
+  ) %>%
+  mutate(
+    percent =
+      100 * n / sum(n)
+  )
+
+plant_pattern_summary
+```
+
+
+
+This is probably one of the most useful exploratory tables for your plant samples.
+
+49. Identify possible plant-associated exudate features
+
+Now let's get closer to your biological idea.
+
+We want features that:
+
+are present in exudate;
+are present in root and/or leaf;
+are not consistently detected in soil control.
+
+That helps eliminate features that are simply normal soil-associated signals.
+
+Root + exudate, absent from soil
+
+```{r}
+root_exudate_not_soil <-
+  plant_compartment_presence %>%
+  filter(
+    root_present,
+    exudate_present,
+    !soil_present
+  ) %>%
+  arrange(
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+
+nrow(
+  root_exudate_not_soil
+)
+```
+
+
+
+Inspect:
+
+```{r}
+root_exudate_not_soil %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    Formula,
+    Ontology,
+    `Total score`,
+    sample_to_blank_ratio,
+    leaf_present,
+    root_present,
+    exudate_present,
+    soil_present
+  ) %>%
+  head(50)
+```
+
+
+
+This is a very interesting candidate list.
+
+50. Leaf + root + exudate, absent from soil
+
+These may represent broadly plant-associated compounds detectable from the soil/exudate extraction.
+
+```{r}
+leaf_root_exudate_not_soil <-
+  plant_compartment_presence %>%
+  filter(
+    leaf_present,
+    root_present,
+    exudate_present,
+    !soil_present
+  ) %>%
+  arrange(
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+
+nrow(
+  leaf_root_exudate_not_soil
+)
+
+```
+
+
+View:
+
+```{r}
+leaf_root_exudate_not_soil %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    Formula,
+    Ontology,
+    `Total score`,
+    sample_to_blank_ratio
+  ) %>%
+  head(50)
+```
+
+
+51. Root + exudate but NOT leaf and NOT soil
+
+This may be even more interesting for root-associated chemistry.
+
+root_exudate_specific_candidates <-
+  plant_compartment_presence %>%
+  filter(
+    !leaf_present,
+    root_present,
+    exudate_present,
+    !soil_present
+  ) %>%
+  arrange(
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+
+nrow(
+  root_exudate_specific_candidates
+)
+
+Inspect:
+
+root_exudate_specific_candidates %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    Formula,
+    Ontology,
+    `Total score`,
+    sample_to_blank_ratio
+  ) %>%
+  head(50)
+
+This category would get my attention.
+
+Conceptually:
+
+Leaf       absent
+Root       present
+Exudate    present
+Soil       absent
+
+That pattern is consistent with a root-associated compound appearing in the rhizosphere/exudate extraction.
+
+Still not proof of secretion—but much stronger biological prioritization than just “exudate peak high.”
+
+52. Exudate-only candidates absent from soil
+
+You should also keep these.
+
+A compound doesn't have to accumulate strongly inside root tissue to be released outside the plant.
+
+exudate_only_not_soil <-
+  plant_compartment_presence %>%
+  filter(
+    !leaf_present,
+    !root_present,
+    exudate_present,
+    !soil_present
+  ) %>%
+  arrange(
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+
+nrow(
+  exudate_only_not_soil
+)
+
+Those could potentially include:
+
+low-abundance secreted compounds;
+compounds rapidly exported from roots;
+root-derived transformation products;
+microbially transformed plant compounds;
+compounds produced specifically in the rhizosphere.
+
+So do not discard them simply because they aren't detected in root tissue.
+
+53. Save the plant-compartment candidate tables
+write.csv(
+  plant_compartment_presence,
+  "positive_mode_plant_compartment_presence.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  plant_pattern_summary,
+  "positive_mode_plant_pattern_summary.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  root_exudate_not_soil,
+  "positive_mode_root_exudate_not_soil.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  leaf_root_exudate_not_soil,
+  "positive_mode_leaf_root_exudate_not_soil.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  root_exudate_specific_candidates,
+  "positive_mode_root_exudate_specific_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  exudate_only_not_soil,
+  "positive_mode_exudate_only_not_soil.csv",
+  row.names = FALSE
+)

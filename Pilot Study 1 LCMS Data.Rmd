@@ -2248,6 +2248,7 @@ leaf_root_exudate_not_soil %>%
 
 This may be even more interesting for root-associated chemistry.
 
+```{r}
 root_exudate_specific_candidates <-
   plant_compartment_presence %>%
   filter(
@@ -2265,9 +2266,13 @@ root_exudate_specific_candidates <-
 nrow(
   root_exudate_specific_candidates
 )
+```
+
+
 
 Inspect:
 
+```{r}
 root_exudate_specific_candidates %>%
   select(
     feature_name,
@@ -2282,6 +2287,9 @@ root_exudate_specific_candidates %>%
     sample_to_blank_ratio
   ) %>%
   head(50)
+```
+
+
 
 This category would get my attention.
 
@@ -2302,6 +2310,7 @@ You should also keep these.
 
 A compound doesn't have to accumulate strongly inside root tissue to be released outside the plant.
 
+```{r}
 exudate_only_not_soil <-
   plant_compartment_presence %>%
   filter(
@@ -2319,6 +2328,9 @@ exudate_only_not_soil <-
 nrow(
   exudate_only_not_soil
 )
+```
+
+
 
 Those could potentially include:
 
@@ -2331,38 +2343,486 @@ compounds produced specifically in the rhizosphere.
 So do not discard them simply because they aren't detected in root tissue.
 
 53. Save the plant-compartment candidate tables
+
+```{r}
 write.csv(
   plant_compartment_presence,
   "positive_mode_plant_compartment_presence.csv",
   row.names = FALSE
 )
+```
 
+
+```{r}
 write.csv(
   plant_pattern_summary,
   "positive_mode_plant_pattern_summary.csv",
   row.names = FALSE
 )
+```
 
+
+```{r}
 write.csv(
   root_exudate_not_soil,
   "positive_mode_root_exudate_not_soil.csv",
   row.names = FALSE
 )
+```
 
+
+```{r}
 write.csv(
   leaf_root_exudate_not_soil,
   "positive_mode_leaf_root_exudate_not_soil.csv",
   row.names = FALSE
 )
+```
 
+
+```{r}
 write.csv(
   root_exudate_specific_candidates,
   "positive_mode_root_exudate_specific_candidates.csv",
   row.names = FALSE
 )
+```
 
+
+```{r}
 write.csv(
   exudate_only_not_soil,
   "positive_mode_exudate_only_not_soil.csv",
   row.names = FALSE
 )
+```
+
+
+
+54. Differential abundance: exudate vs soil
+
+First run the comparison using the pairwise function we created earlier:
+
+```{r}
+exudate_vs_soil <-
+  run_pairwise_comparison(
+
+    data_matrix =
+      pca_matrix_log,
+
+    metadata =
+      sample_metadata,
+
+    annotation_table =
+      feature_annotations,
+
+    group_1 =
+      "Plant-soil exudate",
+
+    group_2 =
+      "Soil control"
+  )
+```
+
+
+
+Check that it worked:
+
+```{r}
+dim(exudate_vs_soil)
+
+head(
+  exudate_vs_soil
+)
+```
+
+
+55. Summarize the statistical results
+
+Let's first see how many features show evidence of a difference.
+
+```{r}
+exudate_statistics_summary <-
+  exudate_vs_soil %>%
+  summarise(
+
+    total_features =
+      n(),
+
+    raw_p_below_0.05 =
+      sum(
+        p_value < 0.05,
+        na.rm = TRUE
+      ),
+
+    FDR_below_0.05 =
+      sum(
+        adjusted_p_value < 0.05,
+        na.rm = TRUE
+      ),
+
+    absolute_log2FC_above_1 =
+      sum(
+        abs(log2_fold_change) >= 1,
+        na.rm = TRUE
+      ),
+
+    raw_p_and_log2FC =
+      sum(
+        p_value < 0.05 &
+          abs(log2_fold_change) >= 1,
+        na.rm = TRUE
+      ),
+
+    FDR_and_log2FC =
+      sum(
+        adjusted_p_value < 0.05 &
+          abs(log2_fold_change) >= 1,
+        na.rm = TRUE
+      )
+  )
+
+exudate_statistics_summary
+
+```
+
+
+Remember:
+
+log2FC = +1    = 2× higher in exudate
+log2FC = +2    = 4× higher
+log2FC = +3    = 8× higher
+
+log2FC = -1    = 2× higher in soil
+log2FC = -2    = 4× higher in soil
+
+Because you only have n = 3 per group, don't be surprised if relatively few features survive FDR correction. We shouldn't equate FDR > 0.05 with “biologically uninteresting” in this pilot.
+
+56. Classify exudate-vs-soil features
+
+Now make the results easier to interpret.
+
+```{r}
+exudate_vs_soil <-
+  exudate_vs_soil %>%
+  mutate(
+
+    statistical_category =
+      case_when(
+
+        adjusted_p_value < 0.05 &
+          log2_fold_change >= 1 ~
+          "Exudate enriched - FDR significant",
+
+        adjusted_p_value < 0.05 &
+          log2_fold_change <= -1 ~
+          "Soil enriched - FDR significant",
+
+        p_value < 0.05 &
+          log2_fold_change >= 1 ~
+          "Exudate enriched - exploratory",
+
+        p_value < 0.05 &
+          log2_fold_change <= -1 ~
+          "Soil enriched - exploratory",
+
+        TRUE ~
+          "Not selected"
+      )
+  )
+
+```
+
+
+Count:
+
+```{r}
+exudate_vs_soil %>%
+  count(
+    statistical_category,
+    sort = TRUE
+  )
+```
+
+
+57. Make the volcano plot
+
+```{r}
+exudate_volcano_data <-
+  exudate_vs_soil %>%
+  mutate(
+
+    minus_log10_p =
+      -log10(
+        pmax(
+          p_value,
+          1e-300
+        )
+      )
+  )
+```
+
+
+Plot:
+
+```{r}
+ggplot(
+  exudate_volcano_data,
+  aes(
+    x = log2_fold_change,
+    y = minus_log10_p,
+    fill = statistical_category
+  )
+) +
+
+  geom_point(
+    shape = 21,
+    size = 2.5,
+    alpha = 0.75
+  ) +
+
+  geom_vline(
+    xintercept = c(-1, 1),
+    linetype = "dashed"
+  ) +
+
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed"
+  ) +
+
+  labs(
+
+    title =
+      "Plant-soil exudate vs soil control",
+
+    subtitle =
+      "Positive-mode LC-MS",
+
+    x =
+      "Log2 fold change (exudate / soil)",
+
+    y =
+      "-log10 raw p-value",
+
+    fill =
+      "Classification"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "bottom"
+  )
+
+```
+
+
+This gives you the broad quantitative picture.
+
+58. Now connect the statistics to the biology
+
+This is the part I think is particularly important for your experiment.
+
+You already created:
+
+root_exudate_specific_candidates
+
+Those are:
+
+Leaf       absent
+Root       present
+Exudate    present
+Soil       absent
+
+Now join those candidates to the exudate-vs-soil statistics.
+
+root_exudate_candidate_stats <-
+  root_exudate_specific_candidates %>%
+
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    Formula,
+    Ontology,
+    `Total score`,
+    sample_to_blank_ratio
+  ) %>%
+
+  left_join(
+
+    exudate_vs_soil %>%
+      select(
+        feature_name,
+        group_1_mean,
+        group_2_mean,
+        log2_fold_change,
+        fold_change,
+        p_value,
+        adjusted_p_value,
+        statistical_category
+      ),
+
+    by = "feature_name"
+  )
+
+Then rank them:
+
+root_exudate_candidate_stats <-
+  root_exudate_candidate_stats %>%
+  arrange(
+    p_value,
+    desc(log2_fold_change)
+  )
+
+root_exudate_candidate_stats
+
+Now your table is doing something much more powerful.
+
+Instead of merely:
+
+F1207
+Root = yes
+Exudate = yes
+Soil = no
+
+you'll have:
+
+Feature
+m/z
+RT
+MS/MS?
+blank ratio
+exudate mean
+soil mean
+log2 fold change
+fold change
+p-value
+FDR
+59. Add a candidate-priority category
+
+For a pilot study, I don't want you throwing away interesting candidates merely because FDR doesn't reach 0.05 with three replicates.
+
+Instead, classify the evidence.
+
+root_exudate_candidate_stats <-
+  root_exudate_candidate_stats %>%
+  mutate(
+
+    candidate_priority =
+      case_when(
+
+        adjusted_p_value < 0.05 &
+          log2_fold_change >= 1 ~
+          "Priority 1 - FDR supported",
+
+        p_value < 0.05 &
+          log2_fold_change >= 1 ~
+          "Priority 2 - exploratory statistical support",
+
+        log2_fold_change >= 1 ~
+          "Priority 3 - strong fold change",
+
+        TRUE ~
+          "Priority 4 - presence-pattern candidate"
+      )
+  )
+
+Count them:
+
+root_exudate_candidate_stats %>%
+  count(
+    candidate_priority
+  )
+60. Flag MS/MS and suspicious early retention times
+
+Now add analytical confidence.
+
+root_exudate_candidate_stats <-
+  root_exudate_candidate_stats %>%
+  mutate(
+
+    RT_flag =
+      case_when(
+
+        `Average Rt(min)` < 0.5 ~
+          "Very early RT - inspect carefully",
+
+        `Average Rt(min)` < 1.0 ~
+          "Early RT - inspect",
+
+        TRUE ~
+          "RT >= 1 min"
+      ),
+
+    MSMS_flag =
+      case_when(
+
+        `MS/MS assigned` == TRUE ~
+          "MS/MS available",
+
+        TRUE ~
+          "No MS/MS assignment"
+      )
+  )
+
+Now inspect the most promising ones:
+
+root_exudate_candidate_stats %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    RT_flag,
+    sample_to_blank_ratio,
+    group_1_mean,
+    group_2_mean,
+    log2_fold_change,
+    fold_change,
+    p_value,
+    adjusted_p_value,
+    candidate_priority
+  ) %>%
+  arrange(
+    candidate_priority,
+    p_value
+  )
+61. Save this important candidate table
+write.csv(
+  root_exudate_candidate_stats,
+  "positive_mode_root_exudate_candidate_statistics.csv",
+  row.names = FALSE
+)
+
+This is one of the first output files from this analysis that I would consider a biologically interpretable candidate table rather than simply a QC/statistical intermediate.
+
+Then we should do something slightly different
+
+After this, I wouldn't immediately repeat all of this for every comparison.
+
+First, show me the output of:
+
+exudate_statistics_summary
+
+and:
+
+root_exudate_candidate_stats %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `MS/MS assigned`,
+    sample_to_blank_ratio,
+    log2_fold_change,
+    fold_change,
+    p_value,
+    adjusted_p_value,
+    candidate_priority
+  )

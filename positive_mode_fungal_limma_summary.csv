@@ -1,0 +1,7 @@
+"comparison","tested_features","raw_p_under_05","FDR_under_05","FDR_and_twofold","group1_enriched_FDR","group2_enriched_FDR"
+"Fungal_in_vs_out",2290,919,456,267,173,94
+"Fungal_in_vs_control",2270,1051,807,583,332,251
+"Fungal_out_vs_control",2556,429,30,26,17,9
+"Fungi_old_vs_control",2269,841,52,52,41,11
+"Fungi_old_vs_Fungal_in",2053,822,262,261,152,109
+"Fungi_old_vs_Fungal_out",2236,839,162,162,97,65

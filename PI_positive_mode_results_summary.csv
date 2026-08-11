@@ -1,0 +1,12 @@
+"result","n"
+"Raw MS-DIAL features",5169
+"Features after positive-mode filtering",4144
+"Plant-associated features",3211
+"Fungus-associated features",3037
+"Plant + fungus shared features",2124
+"Strict root-exudate-fungus candidates",4
+"Exudate-associated detection features",129
+"Exudate-soil quantifiable features",1386
+"Exudate-soil Tier 1 candidates",1
+"Old-vs-new fungal differential features",262
+"Age-stable fungal effects",14

@@ -1,0 +1,6 @@
+"feature_name","Average Rt(min)","Average Mz","MS/MS assigned","leaf_n","root_n","exudate_n","soil_n","fungal_control_n","fungal_out_n","fungal_in_n","fungi_old_n","leaf_present","root_present","exudate_present","soil_present","fungal_control_present","fungal_out_present","fungal_in_present","fungi_old_present"
+"F1085_mz155.0428_rt0.44",0.441,155.04285,FALSE,1,3,3,1,3,3,3,3,FALSE,TRUE,TRUE,FALSE,TRUE,TRUE,TRUE,TRUE
+"F1207_mz164.1072_rt1.26",1.259,164.10722,TRUE,0,2,2,1,3,3,3,3,FALSE,TRUE,TRUE,FALSE,TRUE,TRUE,TRUE,TRUE
+"F2544_mz260.1973_rt0.9",0.897,260.1973,TRUE,0,2,2,1,3,3,3,3,FALSE,TRUE,TRUE,FALSE,TRUE,TRUE,TRUE,TRUE
+"F4601_mz494.8109_rt0.42",0.417,494.81091,FALSE,0,2,3,1,3,3,3,3,FALSE,TRUE,TRUE,FALSE,TRUE,TRUE,TRUE,TRUE
+"F5091_mz739.7451_rt9.7",9.703,739.74512,FALSE,0,2,3,1,1,1,2,2,FALSE,TRUE,TRUE,FALSE,FALSE,FALSE,TRUE,TRUE

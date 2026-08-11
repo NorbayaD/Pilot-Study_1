@@ -1,0 +1,41 @@
+"comparison","detection_category","n","percent"
+"Exudate_vs_Soil","Exudate-associated detection",129,3.11293436293436
+"Exudate_vs_Soil","Not consistently detected in either",2505,60.4488416988417
+"Exudate_vs_Soil","Quantifiable in both",1386,33.4459459459459
+"Exudate_vs_Soil","Soil-associated detection",124,2.99227799227799
+"Exudate_vs_Root","Exudate-associated detection",401,9.67664092664093
+"Exudate_vs_Root","Not consistently detected in either",1785,43.0743243243243
+"Exudate_vs_Root","Quantifiable in both",1114,26.8822393822394
+"Exudate_vs_Root","Root-associated detection",844,20.3667953667954
+"Exudate_vs_Leaf","Exudate-associated detection",301,7.26351351351351
+"Exudate_vs_Leaf","Leaf-associated detection",1615,38.9720077220077
+"Exudate_vs_Leaf","Not consistently detected in either",1014,24.469111969112
+"Exudate_vs_Leaf","Quantifiable in both",1214,29.2953667953668
+"Leaf_vs_Root","Leaf-associated detection",1024,24.7104247104247
+"Leaf_vs_Root","Not consistently detected in either",1162,28.0405405405405
+"Leaf_vs_Root","Quantifiable in both",1805,43.5569498069498
+"Leaf_vs_Root","Root-associated detection",153,3.69208494208494
+"Fungal_in_vs_out","Fungal in-associated detection",89,2.1476833976834
+"Fungal_in_vs_out","Fungal out-associated detection",378,9.12162162162162
+"Fungal_in_vs_out","Not consistently detected in either",1387,33.4700772200772
+"Fungal_in_vs_out","Quantifiable in both",2290,55.2606177606178
+"Fungal_in_vs_control","Fungal control-associated detection",482,11.6312741312741
+"Fungal_in_vs_control","Fungal in-associated detection",109,2.63030888030888
+"Fungal_in_vs_control","Not consistently detected in either",1283,30.9604247104247
+"Fungal_in_vs_control","Quantifiable in both",2270,54.7779922779923
+"Fungal_out_vs_control","Fungal control-associated detection",196,4.72972972972973
+"Fungal_out_vs_control","Fungal out-associated detection",112,2.7027027027027
+"Fungal_out_vs_control","Not consistently detected in either",1280,30.8880308880309
+"Fungal_out_vs_control","Quantifiable in both",2556,61.6795366795367
+"Fungi_old_vs_control","Fungal control-associated detection",483,11.6554054054054
+"Fungi_old_vs_control","Fungi old-associated detection",300,7.23938223938224
+"Fungi_old_vs_control","Not consistently detected in either",1092,26.3513513513514
+"Fungi_old_vs_control","Quantifiable in both",2269,54.753861003861
+"Fungi_old_vs_Fungal_in","Fungal in-associated detection",326,7.86679536679537
+"Fungi_old_vs_Fungal_in","Fungi old-associated detection",516,12.4517374517375
+"Fungi_old_vs_Fungal_in","Not consistently detected in either",1249,30.1399613899614
+"Fungi_old_vs_Fungal_in","Quantifiable in both",2053,49.5415057915058
+"Fungi_old_vs_Fungal_out","Fungal out-associated detection",432,10.4247104247104
+"Fungi_old_vs_Fungal_out","Fungi old-associated detection",333,8.03571428571429
+"Fungi_old_vs_Fungal_out","Not consistently detected in either",1143,27.5820463320463
+"Fungi_old_vs_Fungal_out","Quantifiable in both",2236,53.957528957529

@@ -2397,248 +2397,4978 @@ write.csv(
 )
 ```
 
-
-
-54. Differential abundance: exudate vs soil
-
-First run the comparison using the pairwise function we created earlier:
+54. Define all quantitative comparisons
+# ------------------------------------------------------------
+# COMPARISON-SPECIFIC QUANTITATIVE ANALYSIS
+# ------------------------------------------------------------
 
 ```{r}
-exudate_vs_soil <-
-  run_pairwise_comparison(
+quantitative_comparisons <- list(
 
-    data_matrix =
-      pca_matrix_log,
+  # -------------------------
+  # PLANT / SOIL COMPARISONS
+  # -------------------------
 
-    metadata =
-      sample_metadata,
+  Exudate_vs_Soil = list(
+    group1_cols = presence_groups$Exudate,
+    group2_cols = presence_groups$Soil,
+    group1_name = "Exudate",
+    group2_name = "Soil"
+  ),
 
-    annotation_table =
-      feature_annotations,
+  Exudate_vs_Root = list(
+    group1_cols = presence_groups$Exudate,
+    group2_cols = presence_groups$Root,
+    group1_name = "Exudate",
+    group2_name = "Root"
+  ),
 
-    group_1 =
-      "Plant-soil exudate",
+  Exudate_vs_Leaf = list(
+    group1_cols = presence_groups$Exudate,
+    group2_cols = presence_groups$Leaf,
+    group1_name = "Exudate",
+    group2_name = "Leaf"
+  ),
 
-    group_2 =
-      "Soil control"
+  Leaf_vs_Root = list(
+    group1_cols = presence_groups$Leaf,
+    group2_cols = presence_groups$Root,
+    group1_name = "Leaf",
+    group2_name = "Root"
+  ),
+
+  # -------------------------
+  # FUNGAL COMPARISONS
+  # -------------------------
+
+  Fungal_in_vs_out = list(
+    group1_cols = presence_groups$Fungal_in,
+    group2_cols = presence_groups$Fungal_out,
+    group1_name = "Fungal in",
+    group2_name = "Fungal out"
+  ),
+
+  Fungal_in_vs_control = list(
+    group1_cols = presence_groups$Fungal_in,
+    group2_cols = presence_groups$Fungal_control,
+    group1_name = "Fungal in",
+    group2_name = "Fungal control"
+  ),
+
+  Fungal_out_vs_control = list(
+    group1_cols = presence_groups$Fungal_out,
+    group2_cols = presence_groups$Fungal_control,
+    group1_name = "Fungal out",
+    group2_name = "Fungal control"
+  ),
+
+  # old fungal sample vs agar control
+  Fungi_old_vs_control = list(
+    group1_cols = presence_groups$Fungi_old,
+    group2_cols = presence_groups$Fungal_control,
+    group1_name = "Fungi old",
+    group2_name = "Fungal control"
+  ),
+
+  # directly tests whether old and newer colony-underneath agar differ
+  Fungi_old_vs_Fungal_in = list(
+    group1_cols = presence_groups$Fungi_old,
+    group2_cols = presence_groups$Fungal_in,
+    group1_name = "Fungi old",
+    group2_name = "Fungal in"
+  ),
+
+  # optional spatial comparison with older fungus
+  Fungi_old_vs_Fungal_out = list(
+    group1_cols = presence_groups$Fungi_old,
+    group2_cols = presence_groups$Fungal_out,
+    group1_name = "Fungi old",
+    group2_name = "Fungal out"
   )
-```
-
-
-
-Check that it worked:
-
-```{r}
-dim(exudate_vs_soil)
-
-head(
-  exudate_vs_soil
 )
 ```
 
 
-55. Summarize the statistical results
 
-Let's first see how many features show evidence of a difference.
+The most biologically direct fungal age comparison is:
 
-```{r}
-exudate_statistics_summary <-
-  exudate_vs_soil %>%
-  summarise(
+Fungi old vs Fungal in
 
-    total_features =
-      n(),
+because both represent fungus-associated agar. If those are very similar, age/maturity may matter less than the mere presence of fungal growth.
 
-    raw_p_below_0.05 =
-      sum(
-        p_value < 0.05,
-        na.rm = TRUE
-      ),
+55. Function to prepare each comparison
 
-    FDR_below_0.05 =
-      sum(
-        adjusted_p_value < 0.05,
-        na.rm = TRUE
-      ),
+This separates:
 
-    absolute_log2FC_above_1 =
-      sum(
-        abs(log2_fold_change) >= 1,
-        na.rm = TRUE
-      ),
-
-    raw_p_and_log2FC =
-      sum(
-        p_value < 0.05 &
-          abs(log2_fold_change) >= 1,
-        na.rm = TRUE
-      ),
-
-    FDR_and_log2FC =
-      sum(
-        adjusted_p_value < 0.05 &
-          abs(log2_fold_change) >= 1,
-        na.rm = TRUE
-      )
-  )
-
-exudate_statistics_summary
-
-```
-
-
-Remember:
-
-log2FC = +1    = 2× higher in exudate
-log2FC = +2    = 4× higher
-log2FC = +3    = 8× higher
-
-log2FC = -1    = 2× higher in soil
-log2FC = -2    = 4× higher in soil
-
-Because you only have n = 3 per group, don't be surprised if relatively few features survive FDR correction. We shouldn't equate FDR > 0.05 with “biologically uninteresting” in this pilot.
-
-56. Classify exudate-vs-soil features
-
-Now make the results easier to interpret.
+detection/presence patterns;
+features suitable for quantitative abundance testing.
 
 ```{r}
-exudate_vs_soil <-
-  exudate_vs_soil %>%
-  mutate(
+prepare_quantitative_comparison <- function(
+    data,
+    group1_cols,
+    group2_cols,
+    group1_name,
+    group2_name,
+    min_replicates = 2
+) {
 
-    statistical_category =
-      case_when(
+  detection_table <- data %>%
+    mutate(
 
-        adjusted_p_value < 0.05 &
-          log2_fold_change >= 1 ~
-          "Exudate enriched - FDR significant",
+      group1_n = rowSums(
+        across(
+          all_of(group1_cols),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
 
-        adjusted_p_value < 0.05 &
-          log2_fold_change <= -1 ~
-          "Soil enriched - FDR significant",
+      group2_n = rowSums(
+        across(
+          all_of(group2_cols),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
 
-        p_value < 0.05 &
-          log2_fold_change >= 1 ~
-          "Exudate enriched - exploratory",
+      detection_category = case_when(
 
-        p_value < 0.05 &
-          log2_fold_change <= -1 ~
-          "Soil enriched - exploratory",
+        group1_n >= min_replicates &
+          group2_n >= min_replicates ~
+          "Quantifiable in both",
+
+        group1_n >= min_replicates &
+          group2_n < min_replicates ~
+          paste0(
+            group1_name,
+            "-associated detection"
+          ),
+
+        group1_n < min_replicates &
+          group2_n >= min_replicates ~
+          paste0(
+            group2_name,
+            "-associated detection"
+          ),
 
         TRUE ~
-          "Not selected"
+          "Not consistently detected in either"
       )
+    )
+
+  detection_summary <- detection_table %>%
+    count(
+      detection_category
+    ) %>%
+    mutate(
+      percent =
+        100 * n / sum(n)
+    )
+
+  abundance_features <- detection_table %>%
+    filter(
+      detection_category ==
+        "Quantifiable in both"
+    )
+
+  sample_cols <- c(
+    group1_cols,
+    group2_cols
   )
+
+  raw_matrix <- abundance_features %>%
+    select(
+      feature_name,
+      all_of(sample_cols)
+    ) %>%
+    column_to_rownames(
+      "feature_name"
+    ) %>%
+    as.matrix() %>%
+    t()
+
+  list(
+
+    detection_table =
+      detection_table,
+
+    detection_summary =
+      detection_summary,
+
+    abundance_features =
+      abundance_features,
+
+    raw_matrix =
+      raw_matrix,
+
+    group1_name =
+      group1_name,
+
+    group2_name =
+      group2_name,
+
+    group1_cols =
+      group1_cols,
+
+    group2_cols =
+      group2_cols
+  )
+}
+```
+
+
+56. Run all comparisons
+
+```{r}
+prepared_comparisons <- lapply(
+
+  quantitative_comparisons,
+
+  function(x) {
+
+    prepare_quantitative_comparison(
+
+      data =
+        feature_qc,
+
+      group1_cols =
+        x$group1_cols,
+
+      group2_cols =
+        x$group2_cols,
+
+      group1_name =
+        x$group1_name,
+
+      group2_name =
+        x$group2_name
+    )
+  }
+)
+```
+
+
+
+Check exudate vs soil:
+
+```{r}
+prepared_comparisons$
+  Exudate_vs_Soil$
+  detection_summary
+```
+
+
+
+Check fungi old vs control:
+
+```{r}
+prepared_comparisons$
+  Fungi_old_vs_control$
+  detection_summary
+```
+Save
+```{r}
+write.csv(
+  detection_summary_all,
+  "positive_mode_all_detection_summaries.csv",
+  row.names = FALSE
+)
+```
+
+
+
+Check old vs new/in:
+
+```{r}
+prepared_comparisons$
+  Fungi_old_vs_Fungal_in$
+  detection_summary
+```
+
+57. Combine detection summaries for all comparisons
+```{r}
+detection_summary_all <- bind_rows(
+  
+  lapply(
+    names(prepared_comparisons),
+    
+    function(comparison_name) {
+      
+      prepared_comparisons[[comparison_name]]$detection_summary %>%
+        mutate(
+          comparison = comparison_name
+        )
+    }
+  )
+  
+) %>%
+  select(
+    comparison,
+    detection_category,
+    n,
+    percent
+  )
+
+detection_summary_all
+```
+
+
+
+
+
+Save:
+
+```{r}
+prepared_comparisons$Fungi_old_vs_Fungal_in$detection_summary
+```
+
+58. Count quantifiable features in every comparison
+
+```{r}
+quantifiable_feature_counts <- tibble(
+  
+  comparison = names(prepared_comparisons),
+  
+  quantifiable_features = sapply(
+    prepared_comparisons,
+    function(x) {
+      nrow(x$abundance_features)
+    }
+  )
+)
+
+quantifiable_feature_counts
+```
+
+
+
+This table will be very useful. It tells you how much chemical overlap is available for actual abundance testing.
+
+For example:
+
+Exudate vs Soil               1386
+Fungal in vs control          ?
+Fungi old vs control          ?
+Fungi old vs Fungal in        ?
+
+
+# 59. Summarize remaining zero values
+```{r}
+zero_summary_all <- bind_rows(
+  
+  lapply(
+    names(prepared_comparisons),
+    
+    function(comparison_name) {
+      
+      x <- prepared_comparisons[[comparison_name]]$raw_matrix
+      
+      tibble(
+        
+        comparison = comparison_name,
+        
+        total_values = length(x),
+        
+        zero_values = sum(
+          x == 0,
+          na.rm = TRUE
+        ),
+        
+        zero_percent = 100 *
+          sum(
+            x == 0,
+            na.rm = TRUE
+          ) /
+          length(x)
+      )
+    }
+  )
+)
+
+zero_summary_all
+```
+Save:
+
+```{r}
+write.csv(
+  zero_summary_all,
+  "positive_mode_quantitative_zero_summary.csv",
+  row.names = FALSE
+)
+```
+
+
+
+
+60. Normalize each comparison separately
+
+```{r}
+normalize_comparison_matrix <- function(
+    raw_matrix
+) {
+
+  sample_medians <- apply(
+    raw_matrix,
+    1,
+    function(x) {
+
+      positive_values <-
+        x[
+          x > 0 &
+            is.finite(x)
+        ]
+
+      median(
+        positive_values,
+        na.rm = TRUE
+      )
+    }
+  )
+
+  global_median <-
+    median(
+      sample_medians,
+      na.rm = TRUE
+    )
+
+  normalized_matrix <-
+    sweep(
+      raw_matrix,
+      1,
+      sample_medians,
+      "/"
+    ) *
+    global_median
+
+  log_matrix <-
+    log2(
+      normalized_matrix + 1
+    )
+
+  list(
+
+    normalized =
+      normalized_matrix,
+
+    log =
+      log_matrix,
+
+    sample_medians =
+      sample_medians,
+
+    global_median =
+      global_median
+  )
+}
 
 ```
 
 
-Count:
+Run:
 
 ```{r}
-exudate_vs_soil %>%
-  count(
-    statistical_category,
-    sort = TRUE
+normalized_comparisons <- lapply(
+
+  prepared_comparisons,
+
+  function(x) {
+
+    normalize_comparison_matrix(
+      x$raw_matrix
+    )
+  }
+)
+```
+
+
+61. Comparison-specific PCA function
+
+```{r}
+run_quantitative_pca <- function(
+    log_matrix,
+    metadata,
+    title_text
+) {
+
+  feature_var <- apply(
+    log_matrix,
+    2,
+    var,
+    na.rm = TRUE
+  )
+
+  matrix_use <-
+    log_matrix[
+      ,
+      is.finite(feature_var) &
+        feature_var > 0,
+      drop = FALSE
+    ]
+
+  pca <-
+    prcomp(
+      matrix_use,
+      center = TRUE,
+      scale. = TRUE
+    )
+
+  variance <-
+    (
+      pca$sdev^2 /
+        sum(
+          pca$sdev^2
+        )
+    ) * 100
+
+  scores <-
+    as.data.frame(
+      pca$x
+    ) %>%
+    rownames_to_column(
+      "sample"
+    ) %>%
+    left_join(
+      metadata,
+      by = "sample"
+    )
+
+  plot <-
+    ggplot(
+      scores,
+      aes(
+        x = PC1,
+        y = PC2,
+        fill = group
+      )
+    ) +
+    geom_point(
+      shape = 21,
+      size = 5,
+      color = "black"
+    ) +
+    geom_text_repel(
+      aes(label = sample)
+    ) +
+    labs(
+
+      title =
+        title_text,
+
+      x = paste0(
+        "PC1 (",
+        round(
+          variance[1],
+          1
+        ),
+        "%)"
+      ),
+
+      y = paste0(
+        "PC2 (",
+        round(
+          variance[2],
+          1
+        ),
+        "%)"
+      )
+    ) +
+    theme_classic()
+
+  list(
+    pca = pca,
+    variance = variance,
+    scores = scores,
+    plot = plot
+  )
+}
+```
+
+
+62. Run PCA for every quantitative comparison
+
+```{r}
+quantitative_pca_results <- lapply(
+
+  names(
+    normalized_comparisons
+  ),
+
+  function(comparison_name) {
+
+    run_quantitative_pca(
+
+      log_matrix =
+        normalized_comparisons
+          [[comparison_name]]
+        $log,
+
+      metadata =
+        sample_metadata,
+
+      title_text =
+        paste0(
+          "PCA: ",
+          gsub(
+            "_",
+            " ",
+            comparison_name
+          ),
+          "\nQuantifiable features only"
+        )
+    )
+  }
+)
+
+names(
+  quantitative_pca_results
+) <-
+  names(
+    normalized_comparisons
   )
 ```
 
 
-57. Make the volcano plot
+Inspect fungal-age PCAs
+
+Old vs agar control:
 
 ```{r}
-exudate_volcano_data <-
-  exudate_vs_soil %>%
+quantitative_pca_results$
+  Fungi_old_vs_control$plot
+```
+
+
+
+Old vs new/in:
+
+```{r}
+quantitative_pca_results$
+  Fungi_old_vs_Fungal_in$plot
+```
+
+
+
+Old vs new/out:
+
+```{r}
+quantitative_pca_results$
+  Fungi_old_vs_Fungal_out$plot
+```
+
+
+
+These three together are particularly informative.
+
+Conceptually:
+
+Old vs control
+→ Does older fungal growth alter the agar metabolome?
+
+New/in vs control
+→ Does current fungal growth alter the agar metabolome?
+
+Old vs new/in
+→ Does colony age/maturity alter the fungal-associated metabolome?
+
+Old vs new/out
+→ How does older fungus-associated agar compare with agar outside
+  the newer colony?
+  
+63. Load limma
+
+Install once in Console if necessary:
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+BiocManager::install("limma")
+
+```
+
+
+Then add near your other library() calls:
+
+```{r}
+library(limma)
+```
+
+
+64. Reusable limma function
+
+```{r}
+run_limma_comparison <- function(
+    log_matrix,
+    group1_cols,
+    group2_cols,
+    group1_name,
+    group2_name,
+    annotation_table
+) {
+
+  # limma requires rows = features,
+  # columns = samples
+
+  limma_matrix <-
+    t(
+      log_matrix
+    )
+
+  sample_order <-
+    colnames(
+      limma_matrix
+    )
+
+  comparison_group <-
+    ifelse(
+      sample_order %in%
+        group1_cols,
+      group1_name,
+      group2_name
+    )
+
+  comparison_group <-
+    factor(
+      comparison_group,
+      levels = c(
+        group2_name,
+        group1_name
+      )
+    )
+
+  design <-
+    model.matrix(
+      ~ comparison_group
+    )
+
+  fit <-
+    lmFit(
+      limma_matrix,
+      design
+    )
+
+  fit <-
+    eBayes(
+      fit
+    )
+
+  results <-
+    topTable(
+      fit,
+      coef = 2,
+      number = Inf,
+      adjust.method = "BH",
+      sort.by = "P"
+    ) %>%
+    rownames_to_column(
+      "feature_name"
+    ) %>%
+    left_join(
+      annotation_table,
+      by = "feature_name"
+    ) %>%
+    mutate(
+
+      comparison =
+        paste0(
+          group1_name,
+          " vs ",
+          group2_name
+        ),
+
+      higher_in =
+        case_when(
+
+          logFC > 0 ~
+            group1_name,
+
+          logFC < 0 ~
+            group2_name,
+
+          TRUE ~
+            "Equal"
+        ),
+
+      result_category =
+        case_when(
+
+          adj.P.Val < 0.05 &
+            logFC >= 1 ~
+            paste0(
+              group1_name,
+              " enriched - FDR supported"
+            ),
+
+          adj.P.Val < 0.05 &
+            logFC <= -1 ~
+            paste0(
+              group2_name,
+              " enriched - FDR supported"
+            ),
+
+          P.Value < 0.05 &
+            logFC >= 1 ~
+            paste0(
+              group1_name,
+              " enriched - exploratory"
+            ),
+
+          P.Value < 0.05 &
+            logFC <= -1 ~
+            paste0(
+              group2_name,
+              " enriched - exploratory"
+            ),
+
+          TRUE ~
+            "Not selected"
+        )
+    )
+
+  results
+}
+```
+
+
+65. Run limma for all comparisons
+
+```{r}
+limma_results <- lapply(
+  names(normalized_comparisons),
+  
+  function(comparison_name) {
+    
+    comparison_info <- quantitative_comparisons[[comparison_name]]
+    
+    run_limma_comparison(
+      
+      log_matrix =
+        normalized_comparisons[[comparison_name]]$log,
+      
+      group1_cols =
+        comparison_info$group1_cols,
+      
+      group2_cols =
+        comparison_info$group2_cols,
+      
+      group1_name =
+        comparison_info$group1_name,
+      
+      group2_name =
+        comparison_info$group2_name,
+      
+      annotation_table =
+        feature_annotations
+    )
+  }
+)
+
+names(limma_results) <- names(normalized_comparisons)
+```
+
+
+66. Inspect the fungal-old statistical comparisons
+
+Old vs control:
+```{r}
+head(
+  limma_results$
+    Fungi_old_vs_control,
+  20
+)
+```
+
+
+
+Old vs new/in:
+```{r}
+
+head(
+  limma_results$
+    Fungi_old_vs_Fungal_in,
+  20
+)
+```
+
+
+Old vs new/out:
+
+```{r}
+head(
+  limma_results$
+    Fungi_old_vs_Fungal_out,
+  20
+)
+```
+
+
+67. Summarize all limma comparisons
+
+```{r}
+limma_summary_all <- bind_rows(
+
+  lapply(
+
+    names(
+      limma_results
+    ),
+
+    function(comparison_name) {
+
+      x <-limma_results[[comparison_name]]
+        
+
+      tibble(
+
+        comparison =
+          comparison_name,
+
+        tested_features =
+          nrow(x),
+
+        raw_p_under_05 =
+          sum(
+            x$P.Value < 0.05,
+            na.rm = TRUE
+          ),
+
+        FDR_under_05 =
+          sum(
+            x$adj.P.Val < 0.05,
+            na.rm = TRUE
+          ),
+
+        FDR_and_twofold =
+          sum(
+            x$adj.P.Val < 0.05 &
+              abs(
+                x$logFC
+              ) >= 1,
+            na.rm = TRUE
+          ),
+
+        group1_enriched_FDR =
+          sum(
+            x$adj.P.Val < 0.05 &
+              x$logFC >= 1,
+            na.rm = TRUE
+          ),
+
+        group2_enriched_FDR =
+          sum(
+            x$adj.P.Val < 0.05 &
+              x$logFC <= -1,
+            na.rm = TRUE
+          )
+      )
+    }
+  )
+)
+
+limma_summary_all
+```
+
+
+68. Create a fungal-only statistical summary
+
+```{r}
+fungal_limma_summary <-
+  limma_summary_all %>%
+  filter(
+    comparison %in% c(
+      "Fungal_in_vs_out",
+      "Fungal_in_vs_control",
+      "Fungal_out_vs_control",
+      "Fungi_old_vs_control",
+      "Fungi_old_vs_Fungal_in",
+      "Fungi_old_vs_Fungal_out"
+    )
+  )
+
+fungal_limma_summary
+
+```
+
+
+This will let you compare, side by side, how many features differ in each fungal contrast.
+
+69. Find features shared between old and new fungal effects
+
+This is especially useful for your age question.
+
+First get features significantly different from control in the old fungal group:
+
+```{r}
+old_vs_control_sig <-
+  limma_results$
+    Fungi_old_vs_control %>%
+  filter(
+    adj.P.Val < 0.05,
+    abs(logFC) >= 1
+  ) %>%
+  pull(
+    feature_name
+  )
+```
+
+
+
+Get features significantly different from control in new/in:
+
+```{r}
+
+new_in_vs_control_sig <-
+  limma_results$
+    Fungal_in_vs_control %>%
+  filter(
+    adj.P.Val < 0.05,
+    abs(logFC) >= 1
+  ) %>%
+  pull(
+    feature_name
+  )
+```
+
+
+Shared fungal-effect features:
+
+```{r}
+shared_old_new_fungal_features <-
+  intersect(
+    old_vs_control_sig,
+    new_in_vs_control_sig
+  )
+
+length(
+  shared_old_new_fungal_features
+)
+```
+
+
+Inspect them:
+
+```{r}
+shared_old_new_fungal_results <-
+  feature_annotations %>%
+  filter(
+    feature_name %in%
+      shared_old_new_fungal_features
+  )
+
+shared_old_new_fungal_results
+```
+
+
+These are strong candidates for:
+
+features associated with fungal growth regardless of colony age.
+
+70. Features different between old and new fungal colonies
+
+```{r}
+age_sensitive_fungal_features <-
+  limma_results$
+    Fungi_old_vs_Fungal_in %>%
+  filter(
+    adj.P.Val < 0.05,
+    abs(logFC) >= 1
+  )
+
+age_sensitive_fungal_features
+```
+
+
+
+If this table is small while both old-vs-control and new-in-vs-control are large, that would support:
+
+fungal presence strongly affects the agar chemistry, while colony age has a smaller effect.
+
+If this table is large, age/maturity matters more.
+
+71. Quantify overlap between old and new fungal effects
+
+```{r}
+fungal_overlap_summary <- tibble(
+
+  old_vs_control_significant =
+    length(
+      old_vs_control_sig
+    ),
+
+  new_in_vs_control_significant =
+    length(
+      new_in_vs_control_sig
+    ),
+
+  shared_significant_features =
+    length(
+      shared_old_new_fungal_features
+    ),
+
+  old_only =
+    length(
+      setdiff(
+        old_vs_control_sig,
+        new_in_vs_control_sig
+      )
+    ),
+
+  new_only =
+    length(
+      setdiff(
+        new_in_vs_control_sig,
+        old_vs_control_sig
+      )
+    )
+)
+
+fungal_overlap_summary
+```
+
+
+72. Save the new fungal outputs
+
+```{r}
+write.csv(
+  fungal_limma_summary,
+  "positive_mode_fungal_limma_summary.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  shared_old_new_fungal_results,
+  "positive_mode_shared_old_new_fungal_features.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  age_sensitive_fungal_features,
+  "positive_mode_age_sensitive_fungal_features.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungal_overlap_summary,
+  "positive_mode_fungal_overlap_summary.csv",
+  row.names = FALSE
+)
+```
+
+
+
+And save all limma tables:
+
+```{r}
+for (
+  comparison_name in
+  names(limma_results)
+) {
+
+  write.csv(
+
+    limma_results
+      [[comparison_name]]
+    ,
+
+    paste0(
+      "positive_mode_limma_",
+      comparison_name,
+      ".csv"
+    ),
+
+    row.names = FALSE
+  )
+}
+
+```
+
+
+The first three outputs I’d examine after running this are:
+
+```{r}
+quantifiable_feature_counts
+fungal_limma_summary
+```
+
+
+
+and:
+
+```{r}
+fungal_overlap_summary
+```
+
+73. Create common analytical flags for candidate features
+
+We want to distinguish:
+
+confidently retained RTs from very early RTs;
+features with MS/MS;
+features with an actual MS-DIAL metabolite annotation.
+
+# ------------------------------------------------------------
+# CANDIDATE PRIORITIZATION
+# ------------------------------------------------------------
+
+```{r}
+candidate_annotations <- feature_annotations %>%
   mutate(
 
-    minus_log10_p =
-      -log10(
-        pmax(
-          p_value,
-          1e-300
-        )
+    RT_flag = case_when(
+      `Average Rt(min)` < 0.5 ~
+        "Very early RT",
+
+      `Average Rt(min)` < 1.0 ~
+        "Early RT",
+
+      TRUE ~
+        "RT >= 1 min"
+    ),
+
+    MSMS_flag = case_when(
+      `MS/MS assigned` == TRUE ~
+        "MS/MS available",
+
+      TRUE ~
+        "No MS/MS assignment"
+    ),
+
+    annotation_flag = case_when(
+
+      !is.na(`Metabolite name`) &
+        `Metabolite name` != "" &
+        `Metabolite name` != "Unknown" ~
+        "Annotated",
+
+      TRUE ~
+        "Unknown"
+    )
+  )
+```
+
+
+
+Check:
+
+```{r}
+candidate_annotations %>%
+  count(
+    RT_flag,
+    MSMS_flag,
+    annotation_flag
+  )
+```
+
+
+74. Create plant-compartment annotation table
+
+This gives every feature its leaf/root/exudate/soil detection pattern.
+
+```{r}
+plant_compartment_flags <-
+  plant_compartment_presence %>%
+  select(
+    feature_name,
+    leaf_detected_n,
+    root_detected_n,
+    exudate_detected_n,
+    soil_detected_n,
+    leaf_present,
+    root_present,
+    exudate_present,
+    soil_present,
+    plant_pattern
+  )
+```
+
+
+75. Rank abundance-based exudate vs soil candidates
+
+These are different from the presence-only candidates.
+
+These features were sufficiently detected in both exudate and soil to enter limma.
+
+```{r}
+exudate_soil_abundance_candidates <-
+  limma_results$Exudate_vs_Soil %>%
+
+  left_join(
+    plant_compartment_flags,
+    by = "feature_name"
+  ) %>%
+
+  left_join(
+    candidate_annotations %>%
+      select(
+        feature_name,
+        RT_flag,
+        MSMS_flag,
+        annotation_flag
+      ),
+    by = "feature_name"
+  ) %>%
+
+  mutate(
+
+    evidence_tier = case_when(
+
+      adj.P.Val < 0.05 &
+        abs(logFC) >= 1 ~
+        "Tier 1: FDR + >=2-fold",
+
+      adj.P.Val < 0.05 ~
+        "Tier 2: FDR supported",
+
+      P.Value < 0.05 &
+        abs(logFC) >= 1 ~
+        "Tier 3: exploratory + >=2-fold",
+
+      abs(logFC) >= 1 ~
+        "Tier 4: large effect only",
+
+      TRUE ~
+        "Tier 5: low priority"
+    )
+  ) %>%
+
+  arrange(
+    factor(
+      evidence_tier,
+      levels = c(
+        "Tier 1: FDR + >=2-fold",
+        "Tier 2: FDR supported",
+        "Tier 3: exploratory + >=2-fold",
+        "Tier 4: large effect only",
+        "Tier 5: low priority"
       )
+    ),
+    adj.P.Val,
+    desc(abs(logFC))
+  )
+
+```
+
+
+Inspect the strongest:
+
+```{r}
+exudate_soil_abundance_candidates %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    RT_flag,
+    leaf_present,
+    root_present,
+    exudate_present,
+    soil_present,
+    logFC,
+    P.Value,
+    adj.P.Val,
+    evidence_tier
+  ) %>%
+  head(50)
+```
+
+
+76. Count exudate vs soil candidate tiers
+```{r}
+exudate_soil_abundance_candidates %>%
+  count(
+    evidence_tier
+  )
+```
+
+
+
+And specifically:
+
+```{r}
+sum(
+  exudate_soil_abundance_candidates$
+    adj.P.Val < 0.05,
+  na.rm = TRUE
+)
+```
+
+
+77. Create detection-based plant candidate table
+
+Now handle the features that may be biologically very interesting because of differential detection.
+
+These do not need to be quantifiable in soil.
+
+```{r}
+plant_detection_candidates <-
+  plant_compartment_presence %>%
+
+  filter(
+    exudate_present,
+    !soil_present
+  ) %>%
+
+  left_join(
+    candidate_annotations %>%
+      select(
+        feature_name,
+        RT_flag,
+        MSMS_flag,
+        annotation_flag
+      ),
+    by = "feature_name"
+  ) %>%
+
+  mutate(
+
+    plant_candidate_class = case_when(
+
+      !leaf_present &
+        root_present &
+        exudate_present &
+        !soil_present ~
+        "Root + Exudate; absent Leaf/Soil",
+
+      leaf_present &
+        root_present &
+        exudate_present &
+        !soil_present ~
+        "Leaf + Root + Exudate; absent Soil",
+
+      !leaf_present &
+        !root_present &
+        exudate_present &
+        !soil_present ~
+        "Exudate only; absent Soil",
+
+      leaf_present &
+        !root_present &
+        exudate_present &
+        !soil_present ~
+        "Leaf + Exudate; absent Root/Soil",
+
+      TRUE ~
+        "Other plant-associated pattern"
+    )
+  )
+```
+
+
+78. Add raw group means to detection-based plant candidates
+
+For these candidates, it is useful to see the actual MS-DIAL peak-height pattern.
+
+```{r}
+plant_detection_candidates <-
+  plant_detection_candidates %>%
+  mutate(
+
+    leaf_mean_raw =
+      rowMeans(
+        across(
+          all_of(
+            presence_groups$Leaf
+          )
+        ),
+        na.rm = TRUE
+      ),
+
+    root_mean_raw =
+      rowMeans(
+        across(
+          all_of(
+            presence_groups$Root
+          )
+        ),
+        na.rm = TRUE
+      ),
+
+    exudate_mean_raw =
+      rowMeans(
+        across(
+          all_of(
+            presence_groups$Exudate
+          )
+        ),
+        na.rm = TRUE
+      ),
+
+    soil_mean_raw =
+      rowMeans(
+        across(
+          all_of(
+            presence_groups$Soil
+          )
+        ),
+        na.rm = TRUE
+      )
+  )
+
+```
+
+
+Rank:
+
+```{r}
+plant_detection_candidates <-
+  plant_detection_candidates %>%
+  arrange(
+    factor(
+      plant_candidate_class,
+      levels = c(
+        "Root + Exudate; absent Leaf/Soil",
+        "Leaf + Root + Exudate; absent Soil",
+        "Exudate only; absent Soil",
+        "Leaf + Exudate; absent Root/Soil",
+        "Other plant-associated pattern"
+      )
+    ),
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+
+```
+
+
+Inspect:
+
+```{r}
+plant_detection_candidates %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    RT_flag,
+    plant_candidate_class,
+    leaf_mean_raw,
+    root_mean_raw,
+    exudate_mean_raw,
+    soil_mean_raw,
+    sample_to_blank_ratio
+  ) %>%
+  head(50)
+```
+
+
+79. Specifically rank root + exudate candidates
+
+```{r}
+ranked_root_exudate_candidates <-
+  plant_detection_candidates %>%
+
+  filter(
+    plant_candidate_class ==
+      "Root + Exudate; absent Leaf/Soil"
+  ) %>%
+
+  mutate(
+
+    priority = case_when(
+
+      `MS/MS assigned` == TRUE &
+        `Average Rt(min)` >= 1 ~
+        "Priority 1",
+
+      `Average Rt(min)` >= 1 ~
+        "Priority 2",
+
+      `MS/MS assigned` == TRUE ~
+        "Priority 3",
+
+      TRUE ~
+        "Priority 4"
+    )
+  ) %>%
+
+  arrange(
+    priority,
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+
+```
+
+
+View:
+
+```{r}
+ranked_root_exudate_candidates %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `MS/MS assigned`,
+    RT_flag,
+    root_mean_raw,
+    exudate_mean_raw,
+    soil_mean_raw,
+    sample_to_blank_ratio,
+    priority
+  )
+```
+
+
+
+This is where your earlier five root+exudate candidates should appear.
+
+80. Rank exudate-only candidates
+
+```{r}
+ranked_exudate_only_candidates <-
+  plant_detection_candidates %>%
+
+  filter(
+    plant_candidate_class ==
+      "Exudate only; absent Soil"
+  ) %>%
+
+  mutate(
+
+    priority = case_when(
+
+      `MS/MS assigned` == TRUE &
+        `Average Rt(min)` >= 1 ~
+        "Priority 1",
+
+      `Average Rt(min)` >= 1 ~
+        "Priority 2",
+
+      `MS/MS assigned` == TRUE ~
+        "Priority 3",
+
+      TRUE ~
+        "Priority 4"
+    )
+  ) %>%
+
+  arrange(
+    priority,
+    desc(
+      sample_to_blank_ratio
+    )
+  )
+```
+
+
+81. Create fungal differential-detection candidate tables
+
+Now do the same concept for fungi.
+
+Helper:
+
+```{r}
+extract_detection_candidates <- function(
+    comparison_name
+) {
+
+  prepared_comparisons[[comparison_name]] $detection_table %>%
+
+    filter(
+      detection_category !=
+        "Quantifiable in both",
+
+      detection_category !=
+        "Not consistently detected in either"
+    ) %>%
+
+    left_join(
+      candidate_annotations %>%
+        select(
+          feature_name,
+          RT_flag,
+          MSMS_flag,
+          annotation_flag
+        ),
+      by = "feature_name"
+    )
+}
+
+```
+
+
+Important: keep [[comparison_name]] together. Use this exact corrected function instead:
+
+```{r}
+extract_detection_candidates <- function(comparison_name) {
+
+  x <- prepared_comparisons[[comparison_name]]$detection_table
+
+  x %>%
+    filter(
+      detection_category != "Quantifiable in both",
+      detection_category != "Not consistently detected in either"
+    ) %>%
+    left_join(
+      candidate_annotations %>%
+        select(
+          feature_name,
+          RT_flag,
+          MSMS_flag,
+          annotation_flag
+        ),
+      by = "feature_name"
+    )
+}
+
+```
+
+
+Run:
+
+```{r}
+fungal_in_control_detection <-
+  extract_detection_candidates(
+    "Fungal_in_vs_control"
+  )
+
+fungal_out_control_detection <-
+  extract_detection_candidates(
+    "Fungal_out_vs_control"
+  )
+
+fungi_old_control_detection <-
+  extract_detection_candidates(
+    "Fungi_old_vs_control"
+  )
+
+fungi_old_new_detection <-
+  extract_detection_candidates(
+    "Fungi_old_vs_Fungal_in"
+  )
+```
+
+
+82. Inspect old-fungus differential detection
+
+```{r}
+fungi_old_control_detection %>%
+  count(
+    detection_category
+  )
+
+```
+
+
+View candidates:
+```{r}
+fungi_old_control_detection %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `MS/MS assigned`,
+    detection_category,
+    RT_flag,
+    sample_to_blank_ratio
+  ) %>%
+  arrange(
+    desc(
+      sample_to_blank_ratio
+    )
+  ) %>%
+  head(50)
+```
+
+
+83. Build a master fungal abundance table
+
+This is one of the most important fungal analyses.
+
+We will combine:
+
+old fungi vs control;
+new/in fungi vs control;
+old vs new/in.
+
+First extract only the statistical columns.
+
+```{r}
+old_control_stats <-
+  limma_results$Fungi_old_vs_control %>%
+  select(
+    feature_name,
+    old_control_logFC = logFC,
+    old_control_p = P.Value,
+    old_control_FDR = adj.P.Val
+  )
+new_control_stats <-
+  limma_results$Fungal_in_vs_control %>%
+  select(
+    feature_name,
+    new_control_logFC = logFC,
+    new_control_p = P.Value,
+    new_control_FDR = adj.P.Val
+  )
+old_new_stats <-
+  limma_results$Fungi_old_vs_Fungal_in %>%
+  select(
+    feature_name,
+    old_new_logFC = logFC,
+    old_new_p = P.Value,
+    old_new_FDR = adj.P.Val
+  )
+```
+
+
+
+Combine:
+
+```{r}
+fungal_age_master <-
+  full_join(
+    old_control_stats,
+    new_control_stats,
+    by = "feature_name"
+  ) %>%
+
+  full_join(
+    old_new_stats,
+    by = "feature_name"
+  ) %>%
+
+  left_join(
+    candidate_annotations,
+    by = "feature_name"
+  )
+```
+
+
+84. Classify fungal age effects
+
+This directly addresses your biological hypothesis.
+
+```{r}
+fungal_age_master <-
+  fungal_age_master %>%
+
+  mutate(
+
+    old_significant =
+      !is.na(old_control_FDR) &
+      old_control_FDR < 0.05,
+
+    new_significant =
+      !is.na(new_control_FDR) &
+      new_control_FDR < 0.05,
+
+    age_significant =
+      !is.na(old_new_FDR) &
+      old_new_FDR < 0.05,
+
+    same_direction =
+      !is.na(old_control_logFC) &
+      !is.na(new_control_logFC) &
+      sign(old_control_logFC) ==
+        sign(new_control_logFC),
+
+    fungal_age_category =
+      case_when(
+
+        old_significant &
+          new_significant &
+          same_direction &
+          !age_significant ~
+          "Age-stable fungal effect",
+
+        age_significant ~
+          "Age-sensitive fungal effect",
+
+        old_significant &
+          !new_significant ~
+          "Old-associated effect",
+
+        !old_significant &
+          new_significant ~
+          "New-associated effect",
+
+        old_significant &
+          new_significant &
+          !same_direction ~
+          "Opposite old/new responses",
+
+        TRUE ~
+          "No strong fungal-age classification"
+      )
+  )
+```
+
+
+85. Summarize fungal age categories
+
+```{r}
+fungal_age_summary <-
+  fungal_age_master %>%
+  count(
+    fungal_age_category,
+    sort = TRUE
+  )
+
+fungal_age_summary
+```
+
+
+
+This is a major result.
+
+If you see lots of:
+
+Age-stable fungal effect
+
+and relatively few:
+
+Age-sensitive fungal effect
+
+that supports:
+
+The fungus changes agar chemistry, but colony age has a smaller effect.
+
+86. Examine age-stable fungal features
+
+```{r}
+age_stable_fungal_features <-
+  fungal_age_master %>%
+
+  filter(
+    fungal_age_category ==
+      "Age-stable fungal effect"
+  ) %>%
+
+  arrange(
+    pmax(
+      old_control_FDR,
+      new_control_FDR,
+      na.rm = TRUE
+    )
+  )
+```
+
+
+
+View:
+
+```{r}
+age_stable_fungal_features %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `MS/MS assigned`,
+    RT_flag,
+    old_control_logFC,
+    old_control_FDR,
+    new_control_logFC,
+    new_control_FDR,
+    old_new_logFC,
+    old_new_FDR
+  ) %>%
+  head(50)
+```
+
+
+87. Examine age-sensitive fungal features
+
+```{r}
+age_sensitive_fungal_ranked <-
+  fungal_age_master %>%
+
+  filter(
+    fungal_age_category ==
+      "Age-sensitive fungal effect"
+  ) %>%
+
+  arrange(
+    old_new_FDR,
+    desc(
+      abs(
+        old_new_logFC
+      )
+    )
+  )
+
+```
+
+
+View:
+
+```{r}
+age_sensitive_fungal_ranked %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `MS/MS assigned`,
+    RT_flag,
+    old_new_logFC,
+    old_new_p,
+    old_new_FDR,
+    old_control_logFC,
+    new_control_logFC
+  ) %>%
+  head(50)
+```
+
+
+88. Create top plant abundance candidate heatmap
+
+Take the top 30 exudate-vs-soil abundance candidates.
+
+```{r}
+top_exudate_soil_features <-
+  exudate_soil_abundance_candidates %>%
+
+  filter(
+    adj.P.Val < 0.05
+  ) %>%
+
+  arrange(
+    adj.P.Val,
+    desc(
+      abs(logFC)
+    )
+  ) %>%
+
+  slice_head(
+    n = 30
+  ) %>%
+
+  pull(
+    feature_name
+  )
+```
+
+
+
+Only keep features actually present in the quantitative matrix:
+
+```{r}
+top_exudate_soil_features <-
+  intersect(
+    top_exudate_soil_features,
+    colnames(
+      normalized_comparisons$
+        Exudate_vs_Soil$log
+    )
+  )
+```
+
+
+
+Heatmap:
+
+```{r}
+if (
+  length(
+    top_exudate_soil_features
+  ) >= 2
+) {
+
+  exudate_soil_heatmap <-
+    t(
+      normalized_comparisons$
+        Exudate_vs_Soil$log[
+          ,
+          top_exudate_soil_features,
+          drop = FALSE
+        ]
+    )
+
+  pheatmap(
+    exudate_soil_heatmap,
+    scale = "row",
+    clustering_distance_rows =
+      "euclidean",
+    clustering_distance_cols =
+      "euclidean",
+    clustering_method =
+      "complete",
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    fontsize_row = 7,
+    main =
+      "Top differential exudate vs soil features"
+  )
+}
+```
+
+
+```{r}
+top_age_features <-
+  age_sensitive_fungal_ranked %>%
+
+  filter(
+    old_new_FDR < 0.05
+  ) %>%
+
+  slice_head(
+    n = 30
+  ) %>%
+
+  pull(
+    feature_name
+  )
+```
+
+
+Match:
+
+
+```{r}
+top_age_features <-
+  intersect(
+    top_age_features,
+    colnames(
+      normalized_comparisons$
+        Fungi_old_vs_Fungal_in$log
+    )
+  )
+```
+
+Plot:
+
+
+```{r}
+if (
+  length(
+    top_age_features
+  ) >= 2
+) {
+
+  fungal_age_heatmap <-
+    t(
+      normalized_comparisons$
+        Fungi_old_vs_Fungal_in$log[
+          ,
+          top_age_features,
+          drop = FALSE
+        ]
+    )
+
+  pheatmap(
+    fungal_age_heatmap,
+    scale = "row",
+    clustering_distance_rows =
+      "euclidean",
+    clustering_distance_cols =
+      "euclidean",
+    clustering_method =
+      "complete",
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    fontsize_row = 7,
+    main =
+      "Features differing between old and newer fungal growth"
+  )
+}
+```
+
+
+
+90. Create reusable individual-feature plot function
+
+This lets you inspect actual replicates for any limma comparison.
+
+
+```{r}
+plot_comparison_feature <- function(
+    comparison_name,
+    feature_to_plot
+) {
+
+  x <-
+    normalized_comparisons[[comparison_name]]$log
+
+  plot_data <-
+    as.data.frame(x) %>%
+    rownames_to_column(
+      "sample"
+    ) %>%
+
+    select(
+      sample,
+      all_of(
+        feature_to_plot
+      )
+    ) %>%
+
+    rename(
+      log2_intensity =
+        all_of(
+          feature_to_plot
+        )
+    ) %>%
+
+    left_join(
+      sample_metadata,
+      by = "sample"
+    )
+
+  ggplot(
+    plot_data,
+    aes(
+      x = group,
+      y = log2_intensity,
+      fill = group
+    )
+  ) +
+
+    geom_boxplot(
+      width = 0.5,
+      outlier.shape = NA,
+      alpha = 0.5
+    ) +
+
+    geom_jitter(
+      width = 0.08,
+      size = 3
+    ) +
+
+    labs(
+      title =
+        feature_to_plot,
+      x = NULL,
+      y =
+        "Log2 normalized intensity"
+    ) +
+
+    theme_classic() +
+
+    theme(
+      axis.text.x =
+        element_text(
+          angle = 45,
+          hjust = 1
+        ),
+      legend.position =
+        "none"
+    )
+}
+```
+
+
+Again, fix the indexing formatting to keep brackets together. Use this exact function:
+
+
+
+```{r}
+plot_comparison_feature <- function(
+    comparison_name,
+    feature_to_plot
+) {
+
+  x <- normalized_comparisons[[comparison_name]]$log
+
+  plot_data <-
+    as.data.frame(x) %>%
+    rownames_to_column("sample") %>%
+    select(
+      sample,
+      all_of(feature_to_plot)
+    )
+
+  names(plot_data)[2] <-
+    "log2_intensity"
+
+  plot_data <-
+    plot_data %>%
+    left_join(
+      sample_metadata,
+      by = "sample"
+    )
+
+  ggplot(
+    plot_data,
+    aes(
+      x = group,
+      y = log2_intensity,
+      fill = group
+    )
+  ) +
+    geom_boxplot(
+      width = 0.5,
+      outlier.shape = NA,
+      alpha = 0.5
+    ) +
+    geom_jitter(
+      width = 0.08,
+      size = 3
+    ) +
+    labs(
+      title = feature_to_plot,
+      x = NULL,
+      y = "Log2 normalized intensity"
+    ) +
+    theme_classic() +
+    theme(
+      axis.text.x =
+        element_text(
+          angle = 45,
+          hjust = 1
+        ),
+      legend.position = "none"
+    )
+}
+```
+
+
+
+91. Plot strongest exudate vs soil feature
+
+
+
+```{r}
+top_exudate_abundance_feature <-
+  exudate_soil_abundance_candidates %>%
+
+  filter(
+    adj.P.Val < 0.05
+  ) %>%
+
+  arrange(
+    adj.P.Val,
+    desc(
+      abs(logFC)
+    )
+  ) %>%
+
+  slice(1) %>%
+
+  pull(
+    feature_name
   )
 ```
 
 
 Plot:
 
+
 ```{r}
-ggplot(
-  exudate_volcano_data,
-  aes(
-    x = log2_fold_change,
-    y = minus_log10_p,
-    fill = statistical_category
+plot_comparison_feature(
+  "Exudate_vs_Soil",
+  top_exudate_abundance_feature
+)
+```
+
+
+92. Plot strongest fungal-age feature
+
+
+
+```{r}
+top_fungal_age_feature <-
+  age_sensitive_fungal_ranked %>%
+
+  slice(1) %>%
+
+  pull(
+    feature_name
   )
-) +
+plot_comparison_feature(
+  "Fungi_old_vs_Fungal_in",
+  top_fungal_age_feature
+)
+```
 
-  geom_point(
-    shape = 21,
-    size = 2.5,
-    alpha = 0.75
-  ) +
+93. Create annotation-priority subset
 
-  geom_vline(
-    xintercept = c(-1, 1),
-    linetype = "dashed"
-  ) +
+Now identify candidates for actual chemical-identification work.
 
-  geom_hline(
-    yintercept = -log10(0.05),
-    linetype = "dashed"
-  ) +
+```{r}
+annotated_exudate_candidates <-
+  exudate_soil_abundance_candidates %>%
 
-  labs(
+  filter(
+    annotation_flag ==
+      "Annotated" |
+      `MS/MS assigned` ==
+        TRUE
+  ) %>%
 
-    title =
-      "Plant-soil exudate vs soil control",
+  arrange(
+    adj.P.Val,
+    desc(
+      abs(logFC)
+    )
+  )
+```
 
-    subtitle =
-      "Positive-mode LC-MS",
 
-    x =
-      "Log2 fold change (exudate / soil)",
 
-    y =
-      "-log10 raw p-value",
+View:
 
-    fill =
-      "Classification"
-  ) +
 
-  theme_classic() +
+```{r}
+annotated_exudate_candidates %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    Formula,
+    Ontology,
+    `MS/MS assigned`,
+    `Total score`,
+    RT_flag,
+    logFC,
+    P.Value,
+    adj.P.Val
+  ) %>%
+  head(50)
+```
 
-  theme(
-    legend.position = "bottom"
+
+94. Annotation-priority fungal candidates
+
+```{r}
+annotated_fungal_candidates <-
+  fungal_age_master %>%
+
+  filter(
+    annotation_flag ==
+      "Annotated" |
+      `MS/MS assigned` ==
+        TRUE
+  ) %>%
+
+  filter(
+    fungal_age_category !=
+      "No strong fungal-age classification"
+  ) %>%
+
+  arrange(
+    old_new_FDR
+  )
+```
+
+
+95. Build a master candidate table
+
+
+
+This gives you a compact set of high-interest positive-mode LC-MS candidates.
+
+First abundance-based plant candidates:
+
+
+```{r}
+master_plant_abundance_candidates <-
+  exudate_soil_abundance_candidates %>%
+
+  filter(
+    evidence_tier %in% c(
+      "Tier 1: FDR + >=2-fold",
+      "Tier 2: FDR supported",
+      "Tier 3: exploratory + >=2-fold"
+    )
+  ) %>%
+
+  mutate(
+    candidate_source =
+      "Exudate vs Soil abundance"
+  )
+```
+
+
+Detection candidates:
+
+
+
+```{r}
+master_plant_detection_candidates <-
+  plant_detection_candidates %>%
+
+  filter(
+    plant_candidate_class %in% c(
+      "Root + Exudate; absent Leaf/Soil",
+      "Leaf + Root + Exudate; absent Soil",
+      "Exudate only; absent Soil"
+    )
+  ) %>%
+
+  mutate(
+    candidate_source =
+      "Plant compartment detection"
+  )
+```
+
+
+
+Because these tables have different statistical columns, keep them as separate master outputs rather than forcing them into one malformed table.
+
+
+96. Create a standards-review table
+
+This is the table you will eventually use to ask:
+
+Is this candidate sufficiently interesting and sufficiently identified to justify an authentic chemical standard?
+
+For abundance candidates:
+
+
+```{r}
+standards_review_abundance <-
+  exudate_soil_abundance_candidates %>%
+
+  filter(
+    evidence_tier %in% c(
+      "Tier 1: FDR + >=2-fold",
+      "Tier 2: FDR supported",
+      "Tier 3: exploratory + >=2-fold"
+    )
+  ) %>%
+
+  transmute(
+
+    feature_name,
+
+    RT =
+      `Average Rt(min)`,
+
+    mz =
+      `Average Mz`,
+
+    metabolite_name =
+      `Metabolite name`,
+
+    adduct =
+      `Adduct type`,
+
+    formula =
+      Formula,
+
+    ontology =
+      Ontology,
+
+    MSMS =
+      `MS/MS assigned`,
+
+    RT_flag,
+
+    blank_ratio =
+      sample_to_blank_ratio,
+
+    log2_fold_change =
+      logFC,
+
+    raw_p =
+      P.Value,
+
+    FDR =
+      adj.P.Val,
+
+    evidence_tier,
+
+    possible_standard =
+      case_when(
+
+        annotation_flag ==
+          "Annotated" &
+          `MS/MS assigned` ==
+          TRUE &
+          RT_flag ==
+          "RT >= 1 min" ~
+          "High priority to investigate standard",
+
+        annotation_flag ==
+          "Annotated" ~
+          "Investigate annotation first",
+
+        `MS/MS assigned` ==
+          TRUE ~
+          "Unknown feature - investigate MS/MS",
+
+        TRUE ~
+          "Identification needed first"
+      )
+  )
+```
+
+
+View:
+
+
+```{r}
+standards_review_abundance
+```
+
+
+97. Save all candidate tables
+
+
+
+```{r}
+write.csv(
+  exudate_soil_abundance_candidates,
+  "positive_mode_ranked_exudate_soil_abundance_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  plant_detection_candidates,
+  "positive_mode_plant_detection_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  ranked_root_exudate_candidates,
+  "positive_mode_ranked_root_exudate_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  ranked_exudate_only_candidates,
+  "positive_mode_ranked_exudate_only_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungal_age_master,
+  "positive_mode_fungal_age_master.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungal_age_summary,
+  "positive_mode_fungal_age_summary.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  age_stable_fungal_features,
+  "positive_mode_age_stable_fungal_features.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  age_sensitive_fungal_ranked,
+  "positive_mode_age_sensitive_fungal_features.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  annotated_exudate_candidates,
+  "positive_mode_annotated_exudate_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  annotated_fungal_candidates,
+  "positive_mode_annotated_fungal_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  standards_review_abundance,
+  "positive_mode_candidates_for_standard_review.csv",
+  row.names = FALSE
+)
+```
+
+
+98. Save fungal differential-detection tables
+
+
+```{r}
+write.csv(
+  fungal_in_control_detection,
+  "positive_mode_fungal_in_control_detection_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungal_out_control_detection,
+  "positive_mode_fungal_out_control_detection_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungi_old_control_detection,
+  "positive_mode_fungi_old_control_detection_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungi_old_new_detection,
+  "positive_mode_fungi_old_vs_new_detection_candidates.csv",
+  row.names = FALSE
+)
+```
+
+
+99. Save important R objects
+
+This is useful because you now have a lot of analysis objects.
+
+
+```{r}
+saveRDS(
+  limma_results,
+  "positive_mode_limma_results.rds"
+)
+
+saveRDS(
+  prepared_comparisons,
+  "positive_mode_prepared_comparisons.rds"
+)
+
+saveRDS(
+  normalized_comparisons,
+  "positive_mode_normalized_comparisons.rds"
+)
+
+saveRDS(
+  fungal_age_master,
+  "positive_mode_fungal_age_master.rds"
+)
+```
+
+
+Later you can reload one with:
+
+```{r}
+limma_results <-
+  readRDS(
+    "positive_mode_limma_results.rds"
+  )
+```
+
+
+100. Record the R session for reproducibility
+```{r}
+sessionInfo()
+
+```
+
+Save:
+```{r}
+writeLines(
+  capture.output(
+    sessionInfo()
+  ),
+  "positive_mode_R_session_info.txt"
+)
+```
+
+
+
+After you run these sections, the most useful outputs to show me are:
+
+```{r}
+fungal_age_summary
+exudate_soil_abundance_candidates %>%
+  count(evidence_tier)
+ranked_root_exudate_candidates %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `MS/MS assigned`,
+    sample_to_blank_ratio,
+    priority
   )
 
 ```
 
 
-This gives you the broad quantitative picture.
+and:
 
-58. Now connect the statistics to the biology
+```{r}
+standards_review_abundance %>%
+  head(30)
+```
 
-This is the part I think is particularly important for your experiment.
 
-You already created:
 
-root_exudate_specific_candidates
+Plot the 5 candidate features across plant compartments
+# ------------------------------------------------------------
+# Plot 5 root-exudate candidate features across compartments
+# ------------------------------------------------------------
 
-Those are:
 
-Leaf       absent
-Root       present
-Exudate    present
-Soil       absent
+```{r}
+five_candidate_features <- c(
+  "F1207_mz164.1072_rt1.26",
+  "F5091_mz739.7451_rt9.7",
+  "F2544_mz260.1973_rt0.9",
+  "F4601_mz494.8109_rt0.42",
+  "F1085_mz155.0428_rt0.44"
+)
 
-Now join those candidates to the exudate-vs-soil statistics.
+plant_sample_cols <- c(
+  presence_groups$Leaf,
+  presence_groups$Root,
+  presence_groups$Exudate,
+  presence_groups$Soil
+)
+```
 
-root_exudate_candidate_stats <-
-  root_exudate_specific_candidates %>%
+
+
+Now reshape the raw intensity data:
+
+```{r}
+five_feature_plot_data <- feature_qc %>%
+  
+  filter(
+    feature_name %in% five_candidate_features
+  ) %>%
+  
+  select(
+    feature_name,
+    all_of(plant_sample_cols)
+  ) %>%
+  
+  pivot_longer(
+    cols = all_of(plant_sample_cols),
+    names_to = "sample",
+    values_to = "raw_intensity"
+  ) %>%
+  
+  left_join(
+    sample_metadata %>%
+      select(
+        sample,
+        group
+      ),
+    by = "sample"
+  )
+
+```
+
+
+Check it:
+
+five_feature_plot_data
+Give the compartments a biological order
+
+
+```{r}
+five_feature_plot_data <- five_feature_plot_data %>%
+  mutate(
+    
+    group = factor(
+      group,
+      levels = c(
+        "Leaf",
+        "Root",
+        "Plant-soil exudate",
+        "Soil control"
+      )
+    ),
+    
+    feature_name = factor(
+      feature_name,
+      levels = five_candidate_features
+    )
+  )
+```
+
+
+Plot raw LC-MS intensities
+```{r}
+ggplot(
+  five_feature_plot_data,
+  aes(
+    x = group,
+    y = raw_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title = "Root-exudate candidate features across plant compartments",
+    subtitle = "Positive-mode LC-MS; points represent biological replicates",
+    x = NULL,
+    y = "Raw LC-MS feature intensity"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    
+    strip.text = element_text(
+      face = "bold"
+    )
+  )
+```
+
+
+I also want you to make a log2 version
+
+This will probably be much easier to interpret, because LC-MS peak heights can differ by orders of magnitude.
+
+Use log2(intensity + 1) so zeros remain zeros:
+
+```{r}
+five_feature_plot_data <- five_feature_plot_data %>%
+  mutate(
+    log2_intensity =
+      log2(raw_intensity + 1)
+  )
+
+```
+
+
+Then:
+
+```{r}
+ggplot(
+  five_feature_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title = "Root-exudate candidate features across plant compartments",
+    subtitle = "Positive-mode LC-MS; log2-transformed raw feature intensities",
+    x = NULL,
+    y = "log2(Intensity + 1)"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    
+    strip.text = element_text(
+      face = "bold"
+    )
+  )
+```
+
+
+And make one summary table
+
+This will let us see the numbers behind the plots:
+
+```{r}
+five_feature_summary <- five_feature_plot_data %>%
+  group_by(
+    feature_name,
+    group
+  ) %>%
+  summarise(
+    
+    n_detected =
+      sum(
+        raw_intensity > 0,
+        na.rm = TRUE
+      ),
+    
+    mean_intensity =
+      mean(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    median_intensity =
+      median(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    sd_intensity =
+      sd(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    .groups = "drop"
+  )
+
+five_feature_summary
+```
+
+
+Plot the 5 candidate features across plant compartments
+# ------------------------------------------------------------
+# Plot 5 root-exudate candidate features across compartments
+# ------------------------------------------------------------
+
+```{r}
+five_candidate_features <- c(
+  "F1207_mz164.1072_rt1.26",
+  "F5091_mz739.7451_rt9.7",
+  "F2544_mz260.1973_rt0.9",
+  "F4601_mz494.8109_rt0.42",
+  "F1085_mz155.0428_rt0.44"
+)
+
+plant_sample_cols <- c(
+  presence_groups$Leaf,
+  presence_groups$Root,
+  presence_groups$Exudate,
+  presence_groups$Soil
+)
+```
+
+
+
+Now reshape the raw intensity data:
+```{r}
+five_feature_plot_data <- feature_qc %>%
+  
+  filter(
+    feature_name %in% five_candidate_features
+  ) %>%
+  
+  select(
+    feature_name,
+    all_of(plant_sample_cols)
+  ) %>%
+  
+  pivot_longer(
+    cols = all_of(plant_sample_cols),
+    names_to = "sample",
+    values_to = "raw_intensity"
+  ) %>%
+  
+  left_join(
+    sample_metadata %>%
+      select(
+        sample,
+        group
+      ),
+    by = "sample"
+  )
+
+```
+
+
+Check it:
+five_feature_plot_data
+Give the compartments a biological order
+
+
+```{r}
+five_feature_plot_data <- five_feature_plot_data %>%
+  mutate(
+    
+    group = factor(
+      group,
+      levels = c(
+        "Leaf",
+        "Root",
+        "Plant-soil exudate",
+        "Soil control"
+      )
+    ),
+    
+    feature_name = factor(
+      feature_name,
+      levels = five_candidate_features
+    )
+  )
+```
+
+
+Plot raw LC-MS intensities
+
+
+```{r}
+ggplot(
+  five_feature_plot_data,
+  aes(
+    x = group,
+    y = raw_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title = "Root-exudate candidate features across plant compartments",
+    subtitle = "Positive-mode LC-MS; points represent biological replicates",
+    x = NULL,
+    y = "Raw LC-MS feature intensity"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    
+    strip.text = element_text(
+      face = "bold"
+    )
+  )
+```
+
+
+I also want you to make a log2 version
+
+This will probably be much easier to interpret, because LC-MS peak heights can differ by orders of magnitude.
+
+Use log2(intensity + 1) so zeros remain zeros:
+
+```{r}
+five_feature_plot_data <- five_feature_plot_data %>%
+  mutate(
+    log2_intensity =
+      log2(raw_intensity + 1)
+  )
+```
+
+
+
+Then:
+
+```{r}
+ggplot(
+  five_feature_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title = "Root-exudate candidate features across plant compartments",
+    subtitle = "Positive-mode LC-MS; log2-transformed raw feature intensities",
+    x = NULL,
+    y = "log2(Intensity + 1)"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    
+    strip.text = element_text(
+      face = "bold"
+    )
+  )
+```
+
+
+And make one summary table
+
+This will let us see the numbers behind the plots:
+
+```{r}
+five_feature_summary <- five_feature_plot_data %>%
+  group_by(
+    feature_name,
+    group
+  ) %>%
+  summarise(
+    
+    n_detected =
+      sum(
+        raw_intensity > 0,
+        na.rm = TRUE
+      ),
+    
+    mean_intensity =
+      mean(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    median_intensity =
+      median(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    sd_intensity =
+      sd(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    .groups = "drop"
+  )
+
+five_feature_summary
+```
+
+101. create fungal sample columns
+```{r}
+# ------------------------------------------------------------
+# FUNGAL COMPARTMENT / AGE FEATURE PLOTS
+# ------------------------------------------------------------
+
+fungal_sample_cols <- c(
+  presence_groups$Fungal_control,
+  presence_groups$Fungal_out,
+  presence_groups$Fungal_in,
+  presence_groups$Fungi_old
+)
+
+fungal_sample_cols
+```
+102. Make fungal data long-format
+```{r}
+fungal_long <- feature_qc %>%
+  
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    all_of(fungal_sample_cols)
+  ) %>%
+  
+  pivot_longer(
+    cols = all_of(fungal_sample_cols),
+    names_to = "sample",
+    values_to = "raw_intensity"
+  ) %>%
+  
+  left_join(
+    sample_metadata %>%
+      select(
+        sample,
+        group
+      ),
+    by = "sample"
+  )
+```
+
+check
+```{r}
+fungal_long %>%
+  count(group)
+```
+103 Put the fungal conditions in biological order
+```{r}
+fungal_long <- fungal_long %>%
+  mutate(
+    
+    group = factor(
+      group,
+      levels = c(
+        "Fungal control",
+        "Fungal agar out",
+        "Fungal agar in",
+        "Fungi old"
+      )
+    ),
+    
+    log2_intensity =
+      log2(raw_intensity + 1)
+  )
+```
+
+104. First identify the strongest old-vs-new features
+```{r}
+top_fungal_age_candidates <-
+  age_sensitive_fungal_ranked %>%
+  
+  filter(
+    old_new_FDR < 0.05
+  ) %>%
+  
+  arrange(
+    old_new_FDR,
+    desc(abs(old_new_logFC))
+  ) %>%
+  
+  slice_head(
+    n = 10
+  ) %>%
+  
+  pull(feature_name)
+
+top_fungal_age_candidates
+```
+
+105. Plot the top 10 across all foud fungal conditions
+```{r}
+top_fungal_plot_data <-
+  fungal_long %>%
+  
+  filter(
+    feature_name %in%
+      top_fungal_age_candidates
+  )
+```
+
+
+plot the raw intensities Which metabolites/features change as the fungus ages?
+```{r}
+ggplot(
+  top_fungal_plot_data,
+  aes(
+    x = group,
+    y = raw_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title = "Top fungal age-sensitive LC-MS features",
+    subtitle =
+      "Positive-mode LC-MS; points represent biological replicates",
+    x = NULL,
+    y = "Raw LC-MS feature intensity"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+    
+    strip.text =
+      element_text(
+        face = "bold"
+      )
+  )
+```
+
+106 make the log2 version Which metabolites/features change as the fungus ages?
+```{r}
+ggplot(
+  top_fungal_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title =
+      "Top fungal age-sensitive LC-MS features",
+    
+    subtitle =
+      "Control → outside colony → under colony → older fungal growth",
+    
+    x = NULL,
+    y = "log2(Intensity + 1)"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+    
+    strip.text =
+      element_text(
+        face = "bold"
+      )
+  )
+```
+
+107 make a summary table
+```{r}
+fungal_candidate_summary <-
+  top_fungal_plot_data %>%
+  
+  group_by(
+    feature_name,
+    group
+  ) %>%
+  
+  summarise(
+    
+    detected_n =
+      sum(
+        raw_intensity > 0,
+        na.rm = TRUE
+      ),
+    
+    mean_intensity =
+      mean(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    median_intensity =
+      median(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    sd_intensity =
+      sd(
+        raw_intensity,
+        na.rm = TRUE
+      ),
+    
+    .groups = "drop"
+  )
+
+fungal_candidate_summary
+```
+
+108 and we should do the 14 age-stable features separately
+```{r}
+age_stable_feature_names <-
+  age_stable_fungal_features %>%
+  pull(feature_name)
+
+length(age_stable_feature_names)
+```
+then
+```{r}
+age_stable_plot_data <-
+  fungal_long %>%
+  filter(
+    feature_name %in%
+      age_stable_feature_names
+  )
+```
+
+plot Which metabolites/features appear to be consistently associated with fungal growth regardless of age?
+```{r}
+ggplot(
+  age_stable_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+  
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+  
+  geom_jitter(
+    width = 0.08,
+    size = 1.0
+  ) +
+  
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  labs(
+    title =
+      "Age-stable fungal-associated LC-MS features",
+    
+    subtitle =
+      "Features associated with fungal growth regardless of colony age",
+    
+    x = NULL,
+    y = "log2(Intensity + 1)"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none",
+    
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+    
+    strip.text =
+      element_text(
+        face = "bold"
+      )
+  )
+```
+
+109 define all biological compartments
+```{r}
+# ------------------------------------------------------------
+# CROSS-COMPARTMENT FEATURE OVERLAP
+# Plant tissues + exudate + fungal samples
+# ------------------------------------------------------------
+
+cross_compartment_groups <- list(
+
+  Leaf =
+    presence_groups$Leaf,
+
+  Root =
+    presence_groups$Root,
+
+  Exudate =
+    presence_groups$Exudate,
+
+  Soil =
+    presence_groups$Soil,
+
+  Fungal_control =
+    presence_groups$Fungal_control,
+
+  Fungal_out =
+    presence_groups$Fungal_out,
+
+  Fungal_in =
+    presence_groups$Fungal_in,
+
+  Fungi_old =
+    presence_groups$Fungi_old
+)
+```
+
+110 count detection in every compartment
+```{r}
+cross_compartment_presence <- feature_qc %>%
+
+  mutate(
+
+    leaf_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Leaf),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    root_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Root),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    exudate_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Exudate),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    soil_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Soil),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    fungal_control_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Fungal_control),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    fungal_out_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Fungal_out),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    fungal_in_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Fungal_in),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      ),
+
+    fungi_old_n =
+      rowSums(
+        across(
+          all_of(cross_compartment_groups$Fungi_old),
+          ~ .x > 0
+        ),
+        na.rm = TRUE
+      )
+  )
+```
+
+
+111 convert those counts into presence/absence
+```{r}
+cross_compartment_presence <-
+  cross_compartment_presence %>%
+
+  mutate(
+
+    leaf_present =
+      leaf_n >= 2,
+
+    root_present =
+      root_n >= 2,
+
+    exudate_present =
+      exudate_n >= 2,
+
+    soil_present =
+      soil_n >= 2,
+
+    fungal_control_present =
+      fungal_control_n >= 2,
+
+    fungal_out_present =
+      fungal_out_n >= 2,
+
+    fungal_in_present =
+      fungal_in_n >= 2,
+
+    fungi_old_present =
+      fungi_old_n >= 2
+  )
+```
+
+
+112 how many features overlap plant and fungal samples. how many features are consistenly detected somewhere in the plant system and somewhere in fungus-associated samples?
+
+```{r}
+cross_compartment_presence <-
+  cross_compartment_presence %>%
+
+  mutate(
+
+    plant_present =
+      leaf_present |
+      root_present |
+      exudate_present,
+
+    fungus_present =
+      fungal_in_present |
+      fungal_out_present |
+      fungi_old_present,
+
+    plant_and_fungus =
+      plant_present &
+      fungus_present
+  )
+```
+
+
+count them
+```{r}
+cross_compartment_presence %>%
+  summarise(
+
+    total_features =
+      n(),
+
+    plant_features =
+      sum(
+        plant_present
+      ),
+
+    fungal_features =
+      sum(
+        fungus_present
+      ),
+
+    plant_and_fungal_features =
+      sum(
+        plant_and_fungus
+      )
+  )
+```
+
+
+113 look specifically for root + exudate + fungus
+```{r}
+root_exudate_fungal_features <-
+  cross_compartment_presence %>%
+
+  filter(
+
+    root_present,
+
+    exudate_present,
+
+    fungal_in_present |
+      fungi_old_present
+  )
+```
+
+count
+```{r}
+nrow(
+  root_exudate_fungal_features
+)
+```
+
+
+114 exclude things also consistently present in controls
+```{r}
+root_exudate_fungal_not_controls <-
+  cross_compartment_presence %>%
+
+  filter(
+
+    root_present,
+
+    exudate_present,
+
+    fungal_in_present |
+      fungi_old_present,
+
+    !soil_present,
+
+    !fungal_control_present
+  )
+```
+
+
+count
+```{r}
+nrow(
+  root_exudate_fungal_not_controls
+)
+```
+115 look for exudate +fungus but not root
+
+```{r}
+exudate_fungal_not_root <-
+  cross_compartment_presence %>%
+
+  filter(
+
+    exudate_present,
+
+    fungal_in_present |
+      fungi_old_present,
+
+    !root_present,
+
+    !soil_present,
+
+    !fungal_control_present
+  )
+```
+
+count
+```{r}
+nrow(
+  exudate_fungal_not_root
+)
+```
+116 look for root + fungus but not exudate
+```{r}
+root_fungal_not_exudate <-
+  cross_compartment_presence %>%
+
+  filter(
+
+    root_present,
+
+    fungal_in_present |
+      fungi_old_present,
+
+    !exudate_present
+  )
+```
+
+count
+```{r}
+nrow(
+  root_fungal_not_exudate
+)
+```
+
+117 create a biologicallt useful classification
+```{r}
+cross_compartment_presence <-
+  cross_compartment_presence %>%
+
+  mutate(
+
+    cross_pattern = case_when(
+
+      root_present &
+        exudate_present &
+        fungal_in_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Root + Exudate + Fungal in",
+
+      root_present &
+        exudate_present &
+        fungi_old_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Root + Exudate + Fungi old",
+
+      root_present &
+        exudate_present &
+        fungal_in_present &
+        fungi_old_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Root + Exudate + New and Old fungus",
+
+      exudate_present &
+        fungal_in_present &
+        !root_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Exudate + Fungal in",
+
+      root_present &
+        fungal_in_present &
+        !exudate_present ~
+        "Root + Fungal in",
+
+      leaf_present &
+        root_present &
+        exudate_present &
+        fungus_present ~
+        "Leaf + Root + Exudate + Fungus",
+
+      TRUE ~
+        "Other pattern"
+    )
+  )
+```
+
+
+
+alternative: chooses the first condition that matches. the most specific category should come first.
+```{r}
+cross_compartment_presence <-
+  cross_compartment_presence %>%
+
+  mutate(
+
+    cross_pattern = case_when(
+
+      root_present &
+        exudate_present &
+        fungal_in_present &
+        fungi_old_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Root + Exudate + New and Old fungus",
+
+      root_present &
+        exudate_present &
+        fungal_in_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Root + Exudate + Fungal in",
+
+      root_present &
+        exudate_present &
+        fungi_old_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Root + Exudate + Fungi old",
+
+      exudate_present &
+        fungal_in_present &
+        !root_present &
+        !soil_present &
+        !fungal_control_present ~
+        "Exudate + Fungal in",
+
+      root_present &
+        fungal_in_present &
+        !exudate_present ~
+        "Root + Fungal in",
+
+      leaf_present &
+        root_present &
+        exudate_present &
+        fungus_present ~
+        "Leaf + Root + Exudate + Fungus",
+
+      TRUE ~
+        "Other pattern"
+    )
+  )
+```
+
+
+118 count those biological patterns
+
+```{r}
+cross_pattern_summary <-
+  cross_compartment_presence %>%
+
+  count(
+    cross_pattern,
+    sort = TRUE
+  ) %>%
+
+  mutate(
+    percent =
+      100 * n / sum(n)
+  )
+
+cross_pattern_summary
+```
+
+119 check whether our five root-exudate candidates occur in fungal samples
+
+```{r}
+five_cross_compartment <-
+  cross_compartment_presence %>%
+
+  filter(
+    feature_name %in%
+      five_candidate_features
+  ) %>%
+
+  select(
+
+    feature_name,
+
+    `Average Rt(min)`,
+
+    `Average Mz`,
+
+    `MS/MS assigned`,
+
+    leaf_n,
+    root_n,
+    exudate_n,
+    soil_n,
+
+    fungal_control_n,
+    fungal_out_n,
+    fungal_in_n,
+    fungi_old_n,
+
+    leaf_present,
+    root_present,
+    exudate_present,
+    soil_present,
+
+    fungal_control_present,
+    fungal_out_present,
+    fungal_in_present,
+    fungi_old_present
+  )
+
+five_cross_compartment
+```
+120 save the cross-compartment results
+```{r}
+write.csv(
+  cross_compartment_presence,
+  "positive_mode_cross_compartment_presence.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  cross_pattern_summary,
+  "positive_mode_cross_compartment_pattern_summary.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  root_exudate_fungal_not_controls,
+  "positive_mode_root_exudate_fungal_candidates.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  five_cross_compartment,
+  "positive_mode_five_candidates_cross_compartment.csv",
+  row.names = FALSE
+)
+```
+
+inspect the 4 features Notice that only one of your original five candidates appears to meet this stricter fungal-control criterion: F5091. The other three candidates among the four must therefore be features elsewhere in the dataset that weren't part of your original five-feature root/exudate shortlist.
+
+I would inspect those four next
+
+```{r}
+root_exudate_fungal_not_controls %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    Formula,
+    Ontology,
+    `Total score`,
+    sample_to_blank_ratio,
+
+    leaf_n,
+    root_n,
+    exudate_n,
+    soil_n,
+
+    fungal_control_n,
+    fungal_out_n,
+    fungal_in_n,
+    fungi_old_n
+  )
+```
+make boxplotsa
+
+```{r}
+cross_candidate_names <-
+  root_exudate_fungal_not_controls %>%
+  pull(feature_name)
+```
+
+creat long daya
+```{r}
+cross_candidate_samples <- c(
+  presence_groups$Leaf,
+  presence_groups$Root,
+  presence_groups$Exudate,
+  presence_groups$Soil,
+  presence_groups$Fungal_control,
+  presence_groups$Fungal_out,
+  presence_groups$Fungal_in,
+  presence_groups$Fungi_old
+)
+
+cross_candidate_plot_data <- feature_qc %>%
+
+  filter(
+    feature_name %in%
+      cross_candidate_names
+  ) %>%
+
+  select(
+    feature_name,
+    all_of(
+      cross_candidate_samples
+    )
+  ) %>%
+
+  pivot_longer(
+    cols =
+      all_of(
+        cross_candidate_samples
+      ),
+    names_to =
+      "sample",
+    values_to =
+      "raw_intensity"
+  ) %>%
+
+  left_join(
+    sample_metadata %>%
+      select(
+        sample,
+        group
+      ),
+    by = "sample"
+  ) %>%
+
+  mutate(
+    group = factor(
+      group,
+      levels = c(
+        "Leaf",
+        "Root",
+        "Plant-soil exudate",
+        "Soil control",
+        "Fungal control",
+        "Fungal agar out",
+        "Fungal agar in",
+        "Fungi old"
+      )
+    ),
+
+    log2_intensity =
+      log2(
+        raw_intensity + 1
+      )
+  )
+```
+
+plot
+```{r}
+ggplot(
+  cross_candidate_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  labs(
+    title =
+      "Cross-system root–exudate–fungal candidate features",
+
+    subtitle =
+      "Positive-mode LC-MS; individual points are biological replicates",
+
+    x = NULL,
+
+    y =
+      "log2(Intensity + 1)"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position =
+      "none",
+
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+
+    strip.text =
+      element_text(
+        face = "bold"
+      )
+  )
+```
+
+#simplified statistics
+
+121. Master feature-count table by biological compartment
+
+This tells you how many of the 4,144 filtered features are reproducibly detected in each individual sample type.
+
+# ------------------------------------------------------------
+# PI PRESENTATION: RESULTS SUMMARY
+# ------------------------------------------------------------
+
+```{r}
+compartment_feature_counts <- tibble(
+
+  compartment = c(
+    "Leaf",
+    "Root",
+    "Plant-soil exudate",
+    "Soil control",
+    "Fungal control",
+    "Fungal agar out",
+    "Fungal agar in",
+    "Fungi old"
+  ),
+
+  detected_features = c(
+
+    sum(
+      cross_compartment_presence$leaf_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$root_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$exudate_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$soil_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$fungal_control_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$fungal_out_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$fungal_in_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$fungi_old_present,
+      na.rm = TRUE
+    )
+  )
+)
+
+compartment_feature_counts
+```
+
+
+
+
+122. Plot number of reproducibly detected features in every compartment
+```{r}
+compartment_feature_plot <- ggplot(
+  compartment_feature_counts,
+  aes(
+    x = reorder(
+      compartment,
+      detected_features
+    ),
+    y = detected_features,
+    fill = compartment
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(
+      label = detected_features
+    ),
+    hjust = -0.1,
+    size = 4
+  ) +
+
+  labs(
+    title =
+      "Reproducibly detected positive-mode LC-MS features",
+    subtitle =
+      "Presence defined as detection in at least 2 of 3 replicates",
+    x = NULL,
+    y = "Number of filtered LC-MS features"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none"
+  )
+
+compartment_feature_plot
+```
+
+
+
+Save it:
+```{r}
+ggsave(
+  "PI_figure_feature_counts_by_compartment.png",
+  compartment_feature_plot,
+  width = 9,
+  height = 6,
+  dpi = 300
+)
+```
+
+
+123. Create the broad plant–fungus overlap summary
+
+These are the numbers you just obtained.
+
+```{r}
+plant_fungal_overlap_summary <- tibble(
+
+  category = c(
+    "All filtered features",
+    "Plant-associated",
+    "Fungus-associated",
+    "Plant + fungus overlap",
+    "Strict root-exudate-fungus candidates"
+  ),
+
+  n = c(
+
+    nrow(
+      cross_compartment_presence
+    ),
+
+    sum(
+      cross_compartment_presence$plant_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$fungus_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$plant_and_fungus,
+      na.rm = TRUE
+    ),
+
+    nrow(
+      root_exudate_fungal_not_controls
+    )
+  )
+)
+
+plant_fungal_overlap_summary
+
+```
+
+
+
+124. Plot the biological filtering funnel
+
+```{r}
+candidate_funnel_plot <- ggplot(
+  plant_fungal_overlap_summary,
+  aes(
+    x = factor(
+      category,
+      levels = rev(category)
+    ),
+    y = n,
+    fill = category
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(label = n),
+    hjust = -0.1,
+    size = 4
+  ) +
+
+  labs(
+    title =
+      "Filtering positive-mode LC-MS features toward cross-system candidates",
+    subtitle =
+      "The four candidates represent a stringent biological pattern, not the total plant-fungal overlap",
+    x = NULL,
+    y = "Number of LC-MS features"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none"
+  )
+
+candidate_funnel_plot
+```
+
+
+
+This is a really good PI figure, because it prevents the misunderstanding that you only found four overlapping features.
+
+125. Calculate plant-only, fungus-only, and shared feature numbers
+plant_fungal_partition <- cross_compartment_presence %>%
+  summarise(
+
+    plant_only =
+      sum(
+        plant_present &
+          !fungus_present,
+        na.rm = TRUE
+      ),
+
+    fungus_only =
+      sum(
+        fungus_present &
+          !plant_present,
+        na.rm = TRUE
+      ),
+
+    plant_and_fungus =
+      sum(
+        plant_present &
+          fungus_present,
+        na.rm = TRUE
+      ),
+
+    neither =
+      sum(
+        !plant_present &
+          !fungus_present,
+        na.rm = TRUE
+      )
+  )
+
+plant_fungal_partition
+
+This lets you tell Laura:
+
+“Of the filtered feature space, X were only reproducibly detected in the plant system, Y only in fungal-associated samples, and 2,124 occurred in both.”
+
+126. Plot the plant–fungus partition
+
+First reshape:
+
+plant_fungal_partition_long <-
+  plant_fungal_partition %>%
+  pivot_longer(
+    everything(),
+    names_to = "category",
+    values_to = "features"
+  ) %>%
+  mutate(
+
+    category = recode(
+      category,
+
+      plant_only =
+        "Plant only",
+
+      fungus_only =
+        "Fungus only",
+
+      plant_and_fungus =
+        "Plant + fungus",
+
+      neither =
+        "Neither consistently detected"
+    )
+  )
+
+Plot:
+
+plant_fungal_partition_plot <- ggplot(
+  plant_fungal_partition_long,
+  aes(
+    x = category,
+    y = features,
+    fill = category
+  )
+) +
+
+  geom_col() +
+
+  geom_text(
+    aes(label = features),
+    vjust = -0.3,
+    size = 4
+  ) +
+
+  labs(
+    title =
+      "Distribution of filtered features across plant and fungal systems",
+    x = NULL,
+    y = "Number of features"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none",
+    axis.text.x =
+      element_text(
+        angle = 30,
+        hjust = 1
+      )
+  )
+
+plant_fungal_partition_plot
+127. Pairwise overlap table across all eight biological compartments
+
+This will answer questions such as:
+
+How many features are shared between root and exudate?
+Root and fungal-in?
+Exudate and fungal-in?
+Fungal-in and old fungus?
+
+Create a logical matrix:
+
+presence_matrix <- cross_compartment_presence %>%
+  select(
+    Leaf = leaf_present,
+    Root = root_present,
+    Exudate = exudate_present,
+    Soil = soil_present,
+    Fungal_control = fungal_control_present,
+    Fungal_out = fungal_out_present,
+    Fungal_in = fungal_in_present,
+    Fungi_old = fungi_old_present
+  )
+
+Then:
+
+presence_matrix_numeric <-
+  as.matrix(
+    presence_matrix
+  ) * 1
+
+Calculate pairwise overlap:
+
+pairwise_overlap_matrix <-
+  t(presence_matrix_numeric) %*%
+  presence_matrix_numeric
+
+pairwise_overlap_matrix
+
+This is a very important table.
+
+The diagonal tells you:
+
+Leaf vs Leaf = total leaf features
+Root vs Root = total root features
+...
+
+And an off-diagonal cell such as:
+
+Root × Exudate
+
+tells you exactly how many filtered features are reproducibly present in both.
+
+128. Make the overlap matrix into a heatmap
+pheatmap(
+  pairwise_overlap_matrix,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = TRUE,
+  number_format = "%.0f",
+  main =
+    "Shared LC-MS features among plant, soil and fungal compartments"
+)
+
+This may be one of the best overview figures for Laura.
+
+It answers your question visually:
+
+Which sample types have the most chemistry in common?
+
+129. Calculate percent overlap
+
+Raw counts are useful, but percent overlap can also help.
+
+For each pair, use the smaller feature set as the denominator:
+
+pairwise_percent_overlap <-
+  matrix(
+    NA_real_,
+    nrow = ncol(presence_matrix_numeric),
+    ncol = ncol(presence_matrix_numeric)
+  )
+
+rownames(pairwise_percent_overlap) <-
+  colnames(presence_matrix_numeric)
+
+colnames(pairwise_percent_overlap) <-
+  colnames(presence_matrix_numeric)
+
+Calculate:
+
+for (
+  i in seq_len(
+    ncol(presence_matrix_numeric)
+  )
+) {
+
+  for (
+    j in seq_len(
+      ncol(presence_matrix_numeric)
+    )
+  ) {
+
+    overlap <-
+      sum(
+        presence_matrix_numeric[, i] == 1 &
+          presence_matrix_numeric[, j] == 1
+      )
+
+    smaller_total <-
+      min(
+        sum(
+          presence_matrix_numeric[, i]
+        ),
+        sum(
+          presence_matrix_numeric[, j]
+        )
+      )
+
+    pairwise_percent_overlap[i, j] <-
+      100 *
+      overlap /
+      smaller_total
+  }
+}
+
+View:
+
+round(
+  pairwise_percent_overlap,
+  1
+)
+
+Heatmap:
+
+pheatmap(
+  pairwise_percent_overlap,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = TRUE,
+  number_format = "%.1f",
+  main =
+    "Percent feature overlap among biological compartments"
+)
+130. Plant-specific feature-pattern table
+
+Now summarize just:
+
+Leaf
+Root
+Exudate
+Soil
+plant_pattern_detailed <- cross_compartment_presence %>%
+  mutate(
+
+    plant_detection_pattern =
+      paste0(
+        ifelse(
+          leaf_present,
+          "Leaf ",
+          ""
+        ),
+
+        ifelse(
+          root_present,
+          "Root ",
+          ""
+        ),
+
+        ifelse(
+          exudate_present,
+          "Exudate ",
+          ""
+        ),
+
+        ifelse(
+          soil_present,
+          "Soil",
+          ""
+        )
+      )
+  ) %>%
+
+  count(
+    plant_detection_pattern,
+    sort = TRUE
+  )
+
+plant_pattern_detailed
+
+This tells you how many features are:
+
+Leaf only
+Root only
+Leaf + root
+Root + exudate
+Leaf + root + exudate
+Exudate + soil
+all four
+etc.
+131. Fungal-specific feature-pattern table
+
+Do the same for:
+
+Fungal control
+Fungal out
+Fungal in
+Fungi old
+fungal_pattern_detailed <- cross_compartment_presence %>%
+  mutate(
+
+    fungal_detection_pattern =
+      paste0(
+
+        ifelse(
+          fungal_control_present,
+          "Control ",
+          ""
+        ),
+
+        ifelse(
+          fungal_out_present,
+          "Out ",
+          ""
+        ),
+
+        ifelse(
+          fungal_in_present,
+          "In ",
+          ""
+        ),
+
+        ifelse(
+          fungi_old_present,
+          "Old",
+          ""
+        )
+      )
+  ) %>%
+
+  count(
+    fungal_detection_pattern,
+    sort = TRUE
+  )
+
+fungal_pattern_detailed
+
+This is extremely useful for explaining fungal chemistry.
+
+You may find categories like:
+
+Control + Out + In + Old
+In + Old
+Out + In + Old
+In only
+Old only
+132. Plot the top fungal detection patterns
+fungal_pattern_plot_data <-
+  fungal_pattern_detailed %>%
+  filter(
+    fungal_detection_pattern != ""
+  ) %>%
+  slice_head(
+    n = 15
+  )
+
+Plot:
+
+fungal_pattern_plot <- ggplot(
+  fungal_pattern_plot_data,
+  aes(
+    x = reorder(
+      fungal_detection_pattern,
+      n
+    ),
+    y = n
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(label = n),
+    hjust = -0.1
+  ) +
+
+  labs(
+    title =
+      "Most common fungal LC-MS detection patterns",
+    x = NULL,
+    y = "Number of features"
+  ) +
+
+  theme_classic()
+
+fungal_pattern_plot
+133. Plot the top plant detection patterns
+plant_pattern_plot_data <-
+  plant_pattern_detailed %>%
+  filter(
+    plant_detection_pattern != ""
+  ) %>%
+  slice_head(
+    n = 15
+  )
+plant_pattern_plot <- ggplot(
+  plant_pattern_plot_data,
+  aes(
+    x = reorder(
+      plant_detection_pattern,
+      n
+    ),
+    y = n
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(label = n),
+    hjust = -0.1
+  ) +
+
+  labs(
+    title =
+      "Most common plant/soil LC-MS detection patterns",
+    x = NULL,
+    y = "Number of features"
+  ) +
+
+  theme_classic()
+
+plant_pattern_plot
+134. Strict cross-system candidate table
+
+These are the four, and this is where you explain exactly what “four” means.
+
+strict_cross_system_candidates <-
+  root_exudate_fungal_not_controls %>%
 
   select(
     feature_name,
@@ -2650,179 +7380,642 @@ root_exudate_candidate_stats <-
     Formula,
     Ontology,
     `Total score`,
-    sample_to_blank_ratio
-  ) %>%
-
-  left_join(
-
-    exudate_vs_soil %>%
-      select(
-        feature_name,
-        group_1_mean,
-        group_2_mean,
-        log2_fold_change,
-        fold_change,
-        p_value,
-        adjusted_p_value,
-        statistical_category
-      ),
-
-    by = "feature_name"
-  )
-
-Then rank them:
-
-root_exudate_candidate_stats <-
-  root_exudate_candidate_stats %>%
-  arrange(
-    p_value,
-    desc(log2_fold_change)
-  )
-
-root_exudate_candidate_stats
-
-Now your table is doing something much more powerful.
-
-Instead of merely:
-
-F1207
-Root = yes
-Exudate = yes
-Soil = no
-
-you'll have:
-
-Feature
-m/z
-RT
-MS/MS?
-blank ratio
-exudate mean
-soil mean
-log2 fold change
-fold change
-p-value
-FDR
-59. Add a candidate-priority category
-
-For a pilot study, I don't want you throwing away interesting candidates merely because FDR doesn't reach 0.05 with three replicates.
-
-Instead, classify the evidence.
-
-root_exudate_candidate_stats <-
-  root_exudate_candidate_stats %>%
-  mutate(
-
-    candidate_priority =
-      case_when(
-
-        adjusted_p_value < 0.05 &
-          log2_fold_change >= 1 ~
-          "Priority 1 - FDR supported",
-
-        p_value < 0.05 &
-          log2_fold_change >= 1 ~
-          "Priority 2 - exploratory statistical support",
-
-        log2_fold_change >= 1 ~
-          "Priority 3 - strong fold change",
-
-        TRUE ~
-          "Priority 4 - presence-pattern candidate"
-      )
-  )
-
-Count them:
-
-root_exudate_candidate_stats %>%
-  count(
-    candidate_priority
-  )
-60. Flag MS/MS and suspicious early retention times
-
-Now add analytical confidence.
-
-root_exudate_candidate_stats <-
-  root_exudate_candidate_stats %>%
-  mutate(
-
-    RT_flag =
-      case_when(
-
-        `Average Rt(min)` < 0.5 ~
-          "Very early RT - inspect carefully",
-
-        `Average Rt(min)` < 1.0 ~
-          "Early RT - inspect",
-
-        TRUE ~
-          "RT >= 1 min"
-      ),
-
-    MSMS_flag =
-      case_when(
-
-        `MS/MS assigned` == TRUE ~
-          "MS/MS available",
-
-        TRUE ~
-          "No MS/MS assignment"
-      )
-  )
-
-Now inspect the most promising ones:
-
-root_exudate_candidate_stats %>%
-  select(
-    feature_name,
-    `Average Rt(min)`,
-    `Average Mz`,
-    `Metabolite name`,
-    `Adduct type`,
-    `MS/MS assigned`,
-    RT_flag,
     sample_to_blank_ratio,
-    group_1_mean,
-    group_2_mean,
-    log2_fold_change,
-    fold_change,
-    p_value,
-    adjusted_p_value,
-    candidate_priority
-  ) %>%
-  arrange(
-    candidate_priority,
-    p_value
+
+    leaf_n,
+    root_n,
+    exudate_n,
+    soil_n,
+
+    fungal_control_n,
+    fungal_out_n,
+    fungal_in_n,
+    fungi_old_n
   )
-61. Save this important candidate table
+
+strict_cross_system_candidates
+
+Add a descriptive column:
+
+strict_cross_system_candidates <-
+  strict_cross_system_candidates %>%
+  mutate(
+
+    interpretation =
+      "Root + exudate + fungal-associated; not consistently detected in soil or fungal control"
+  )
+135. Cross-system candidate boxplots
+
+You've already generated this, but save a presentation-quality copy:
+
+cross_system_candidate_plot <- ggplot(
+  cross_candidate_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  labs(
+    title =
+      "Cross-system root–exudate–fungal candidate features",
+
+    subtitle =
+      "Positive-mode LC-MS; individual points are biological replicates",
+
+    x = NULL,
+
+    y =
+      "log2(Intensity + 1)"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none",
+
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+
+    strip.text =
+      element_text(
+        face = "bold"
+      )
+  )
+
+cross_system_candidate_plot
+
+Save:
+
+ggsave(
+  "PI_figure_cross_system_candidates.png",
+  cross_system_candidate_plot,
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+136. Summarize exudate-vs-soil detection evidence
+
+You already obtained:
+
+129 exudate-associated
+124 soil-associated
+1,386 quantifiable in both
+2,505 not consistently detected in either.
+
+Let's turn that into a PI figure.
+
+exudate_soil_detection_PI <-
+  prepared_comparisons$
+    Exudate_vs_Soil$
+    detection_summary
+
+exudate_soil_detection_PI
+
+Plot:
+
+exudate_soil_detection_plot <- ggplot(
+  exudate_soil_detection_PI,
+  aes(
+    x = reorder(
+      detection_category,
+      n
+    ),
+    y = n,
+    fill = detection_category
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(
+      label = paste0(
+        n,
+        " (",
+        round(
+          percent,
+          1
+        ),
+        "%)"
+      )
+    ),
+    hjust = -0.05
+  ) +
+
+  labs(
+    title =
+      "Exudate versus soil: feature detection categories",
+    subtitle =
+      "Presence requires detection in at least 2 of 3 replicates",
+    x = NULL,
+    y = "Number of features"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none"
+  )
+
+exudate_soil_detection_plot
+137. Exudate-vs-soil quantitative evidence tiers
+
+You already obtained:
+
+Tier 1    1
+Tier 3    159
+Tier 4    215
+Tier 5   1011
+
+Generate the table:
+
+exudate_evidence_summary <-
+  exudate_soil_abundance_candidates %>%
+  count(
+    evidence_tier
+  )
+
+exudate_evidence_summary
+
+Plot:
+
+exudate_evidence_plot <- ggplot(
+  exudate_evidence_summary,
+  aes(
+    x = reorder(
+      evidence_tier,
+      n
+    ),
+    y = n,
+    fill = evidence_tier
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(label = n),
+    hjust = -0.1
+  ) +
+
+  labs(
+    title =
+      "Strength of quantitative evidence: exudate vs soil",
+    subtitle =
+      "1,386 features were sufficiently detected in both groups for abundance testing",
+    x = NULL,
+    y = "Number of features"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none"
+  )
+
+exudate_evidence_plot
+138. Fungal-age summary figure
+
+Your current numbers are:
+
+No strong classification       1697
+New-vs-control only             649
+Old-vs-new differential         262
+Age-stable fungal effect         14
+Old-vs-control only               6
+
+Use your actual object:
+
+fungal_age_summary
+
+Plot:
+
+fungal_age_summary_plot <- ggplot(
+  fungal_age_summary,
+  aes(
+    x = reorder(
+      fungal_age_category,
+      n
+    ),
+    y = n,
+    fill = fungal_age_category
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  geom_text(
+    aes(label = n),
+    hjust = -0.1
+  ) +
+
+  labs(
+    title =
+      "Fungal age and growth-associated LC-MS patterns",
+    subtitle =
+      "Positive-mode LC-MS",
+    x = NULL,
+    y = "Number of features"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none"
+  )
+
+fungal_age_summary_plot
+139. Fungal-age heatmap
+
+You already generated this. Save it explicitly when you rerun the heatmap:
+
+png(
+  "PI_figure_fungal_age_heatmap.png",
+  width = 2200,
+  height = 1600,
+  res = 200
+)
+
+pheatmap(
+  fungal_age_heatmap,
+  scale = "row",
+  clustering_distance_rows =
+    "euclidean",
+  clustering_distance_cols =
+    "euclidean",
+  clustering_method =
+    "complete",
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  fontsize_row = 7,
+  main =
+    "Features differing between old and newer fungal growth"
+)
+
+dev.off()
+140. Fungal top-feature boxplots
+
+Your top fungal-age plot is useful because the heatmap only shows relative differences.
+
+Save the boxplot:
+
+fungal_age_boxplot <- ggplot(
+  top_fungal_plot_data,
+  aes(
+    x = group,
+    y = log2_intensity,
+    fill = group
+  )
+) +
+
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA,
+    alpha = 0.45
+  ) +
+
+  geom_jitter(
+    width = 0.08,
+    size = 2.5
+  ) +
+
+  facet_wrap(
+    ~ feature_name,
+    scales = "free_y",
+    ncol = 2
+  ) +
+
+  labs(
+    title =
+      "Top fungal age-sensitive LC-MS features",
+
+    subtitle =
+      "Control → outside colony → under colony → older fungal growth",
+
+    x = NULL,
+
+    y =
+      "log2(Intensity + 1)"
+  ) +
+
+  theme_classic() +
+
+  theme(
+    legend.position = "none",
+
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      )
+  )
+
+fungal_age_boxplot
+141. PCA plots to save for Laura
+
+You already have these objects, so don't rerun the entire PCA.
+
+Save the broad PCA:
+
+ggsave(
+  "PI_figure_global_PCA.png",
+  broad_pca_plot,
+  width = 9,
+  height = 7,
+  dpi = 300
+)
+
+Exudate vs soil:
+
+ggsave(
+  "PI_figure_exudate_soil_PCA.png",
+  quantitative_pca_results$
+    Exudate_vs_Soil$plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+Leaf vs root:
+
+ggsave(
+  "PI_figure_leaf_root_PCA.png",
+  quantitative_pca_results$
+    Leaf_vs_Root$plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+Fungal in vs control:
+
+ggsave(
+  "PI_figure_fungal_in_control_PCA.png",
+  quantitative_pca_results$
+    Fungal_in_vs_control$plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+Old vs new fungus:
+
+ggsave(
+  "PI_figure_fungal_old_new_PCA.png",
+  quantitative_pca_results$
+    Fungi_old_vs_Fungal_in$plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+142. Create one master PI summary table
+
+This gives Laura the major numbers without needing to interpret your entire R notebook.
+
+PI_summary_table <- tibble(
+
+  result = c(
+
+    "Raw MS-DIAL features",
+
+    "Features after positive-mode filtering",
+
+    "Plant-associated features",
+
+    "Fungus-associated features",
+
+    "Features shared between plant and fungus",
+
+    "Strict root-exudate-fungus candidates",
+
+    "Exudate-associated detection features",
+
+    "Exudate-soil features quantifiable in both",
+
+    "Exudate-soil Tier 1 abundance candidates",
+
+    "Old-vs-new fungal differential features",
+
+    "Age-stable fungal-associated features"
+  ),
+
+  n = c(
+
+    nrow(feature_table),
+
+    nrow(feature_qc),
+
+    sum(
+      cross_compartment_presence$
+        plant_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$
+        fungus_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$
+        plant_and_fungus,
+      na.rm = TRUE
+    ),
+
+    nrow(
+      root_exudate_fungal_not_controls
+    ),
+
+    129,
+
+    1386,
+
+    sum(
+      exudate_soil_abundance_candidates$
+        evidence_tier ==
+        "Tier 1: FDR + >=2-fold"
+    ),
+
+    sum(
+      fungal_age_master$
+        fungal_age_category ==
+        "Age-sensitive fungal effect",
+      na.rm = TRUE
+    ),
+
+    sum(
+      fungal_age_master$
+        fungal_age_category ==
+        "Age-stable fungal effect",
+      na.rm = TRUE
+    )
+  )
+)
+
+PI_summary_table
+
+I would not hard-code 129 and 1386 long term, though. For a reproducible final notebook, replace them with calculations:
+
+PI_summary_table <- tibble(
+
+  result = c(
+    "Raw MS-DIAL features",
+    "Features after positive-mode filtering",
+    "Plant-associated features",
+    "Fungus-associated features",
+    "Plant + fungus shared features",
+    "Strict root-exudate-fungus candidates",
+    "Exudate-associated detection features",
+    "Exudate-soil quantifiable features",
+    "Exudate-soil Tier 1 candidates",
+    "Old-vs-new fungal differential features",
+    "Age-stable fungal effects"
+  ),
+
+  n = c(
+
+    nrow(feature_table),
+
+    nrow(feature_qc),
+
+    sum(
+      cross_compartment_presence$plant_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$fungus_present,
+      na.rm = TRUE
+    ),
+
+    sum(
+      cross_compartment_presence$plant_and_fungus,
+      na.rm = TRUE
+    ),
+
+    nrow(
+      root_exudate_fungal_not_controls
+    ),
+
+    sum(
+      prepared_comparisons$
+        Exudate_vs_Soil$
+        detection_table$
+        detection_category ==
+        "Exudate-associated detection",
+      na.rm = TRUE
+    ),
+
+    nrow(
+      prepared_comparisons$
+        Exudate_vs_Soil$
+        abundance_features
+    ),
+
+    sum(
+      exudate_soil_abundance_candidates$
+        evidence_tier ==
+        "Tier 1: FDR + >=2-fold",
+      na.rm = TRUE
+    ),
+
+    sum(
+      fungal_age_master$
+        fungal_age_category ==
+        "Age-sensitive fungal effect",
+      na.rm = TRUE
+    ),
+
+    sum(
+      fungal_age_master$
+        fungal_age_category ==
+        "Age-stable fungal effect",
+      na.rm = TRUE
+    )
+  )
+)
+
+PI_summary_table
+
+Save:
+
 write.csv(
-  root_exudate_candidate_stats,
-  "positive_mode_root_exudate_candidate_statistics.csv",
+  PI_summary_table,
+  "PI_positive_mode_results_summary.csv",
+  row.names = FALSE
+)
+143. Save all the new PI tables
+write.csv(
+  compartment_feature_counts,
+  "PI_feature_counts_by_compartment.csv",
   row.names = FALSE
 )
 
-This is one of the first output files from this analysis that I would consider a biologically interpretable candidate table rather than simply a QC/statistical intermediate.
+write.csv(
+  plant_fungal_overlap_summary,
+  "PI_plant_fungal_overlap_summary.csv",
+  row.names = FALSE
+)
 
-Then we should do something slightly different
+write.csv(
+  plant_fungal_partition_long,
+  "PI_plant_fungal_partition.csv",
+  row.names = FALSE
+)
 
-After this, I wouldn't immediately repeat all of this for every comparison.
+write.csv(
+  pairwise_overlap_matrix,
+  "PI_pairwise_feature_overlap_counts.csv"
+)
 
-First, show me the output of:
+write.csv(
+  pairwise_percent_overlap,
+  "PI_pairwise_percent_overlap.csv"
+)
 
-exudate_statistics_summary
+write.csv(
+  plant_pattern_detailed,
+  "PI_plant_detection_patterns.csv",
+  row.names = FALSE
+)
 
-and:
+write.csv(
+  fungal_pattern_detailed,
+  "PI_fungal_detection_patterns.csv",
+  row.names = FALSE
+)
 
-root_exudate_candidate_stats %>%
-  select(
-    feature_name,
-    `Average Rt(min)`,
-    `Average Mz`,
-    `MS/MS assigned`,
-    sample_to_blank_ratio,
-    log2_fold_change,
-    fold_change,
-    p_value,
-    adjusted_p_value,
-    candidate_priority
-  )
+write.csv(
+  strict_cross_system_candidates,
+  "PI_strict_cross_system_candidates.csv",
+  row.names = FALSE
+)

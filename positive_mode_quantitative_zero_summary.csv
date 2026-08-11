@@ -1,0 +1,11 @@
+"comparison","total_values","zero_values","zero_percent"
+"Exudate_vs_Soil",8316,283,3.4030784030784
+"Exudate_vs_Root",6684,248,3.71035308198683
+"Exudate_vs_Leaf",7284,251,3.44590884129599
+"Leaf_vs_Root",10830,392,3.61957525392428
+"Fungal_in_vs_out",13740,371,2.70014556040757
+"Fungal_in_vs_control",13620,365,2.6798825256975
+"Fungal_out_vs_control",15336,350,2.28221178925404
+"Fungi_old_vs_control",13614,402,2.95284266196562
+"Fungi_old_vs_Fungal_in",12318,434,3.52329923688911
+"Fungi_old_vs_Fungal_out",13416,424,3.16040548598688

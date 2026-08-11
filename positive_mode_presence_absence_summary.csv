@@ -1,0 +1,29 @@
+"comparison","presence_category","n","percent"
+"Exudate vs Leaf","Leaf only",1615,38.9720077220077
+"Exudate vs Leaf","Shared",1214,29.2953667953668
+"Exudate vs Leaf","Neither consistently detected",1014,24.469111969112
+"Exudate vs Leaf","Exudate only",301,7.26351351351351
+"Exudate vs Root","Neither consistently detected",1785,43.0743243243243
+"Exudate vs Root","Shared",1114,26.8822393822394
+"Exudate vs Root","Root only",844,20.3667953667954
+"Exudate vs Root","Exudate only",401,9.67664092664093
+"Exudate vs Soil","Neither consistently detected",2505,60.4488416988417
+"Exudate vs Soil","Shared",1386,33.4459459459459
+"Exudate vs Soil","Exudate only",129,3.11293436293436
+"Exudate vs Soil","Soil only",124,2.99227799227799
+"Fungal in vs Fungal control","Shared",2270,54.7779922779923
+"Fungal in vs Fungal control","Neither consistently detected",1283,30.9604247104247
+"Fungal in vs Fungal control","Fungal control only",482,11.6312741312741
+"Fungal in vs Fungal control","Fungal in only",109,2.63030888030888
+"Fungal in vs Fungal out","Shared",2290,55.2606177606178
+"Fungal in vs Fungal out","Neither consistently detected",1387,33.4700772200772
+"Fungal in vs Fungal out","Fungal out only",378,9.12162162162162
+"Fungal in vs Fungal out","Fungal in only",89,2.1476833976834
+"Fungal out vs Fungal control","Shared",2556,61.6795366795367
+"Fungal out vs Fungal control","Neither consistently detected",1280,30.8880308880309
+"Fungal out vs Fungal control","Fungal control only",196,4.72972972972973
+"Fungal out vs Fungal control","Fungal out only",112,2.7027027027027
+"Leaf vs Root","Shared",1805,43.5569498069498
+"Leaf vs Root","Neither consistently detected",1162,28.0405405405405
+"Leaf vs Root","Leaf only",1024,24.7104247104247
+"Leaf vs Root","Root only",153,3.69208494208494

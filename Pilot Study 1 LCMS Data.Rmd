@@ -1,6 +1,8 @@
 ---
 title: "Pilot Study 2 LC-MS Data"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 date: "2026-08-10"
 ---
 
@@ -8,20 +10,6 @@ date: "2026-08-10"
 1. Packages
 
 Don't repeatedly run install.packages() every time you knit the document. Install once in the Console if needed:
-
-```{r}
-install.packages(c(
-  "readxl",
-  "dplyr",
-  "tidyr",
-  "stringr",
-  "ggplot2",
-  "ggrepel",
-  "tibble",
-  "pheatmap"
-))
-```
-
 
 
 Then your R Markdown only needs:
@@ -105,7 +93,7 @@ msdial <- msdial %>%
 ```
 
 
-Check:
+#Check:
 
 ```{r}
 sapply(
@@ -2667,6 +2655,32 @@ prepared_comparisons$
   Fungi_old_vs_control$
   detection_summary
 ```
+
+```{r}
+# Create combined detection summary across all comparisons
+
+detection_summary_all <- bind_rows(
+  lapply(
+    names(prepared_comparisons),
+    function(comparison_name) {
+
+      prepared_comparisons[[comparison_name]]$detection_summary %>%
+        mutate(
+          comparison = comparison_name
+        )
+    }
+  )
+) %>%
+  select(
+    comparison,
+    detection_category,
+    n,
+    percent
+  )
+
+detection_summary_all
+```
+
 Save
 ```{r}
 write.csv(
@@ -6918,9 +6932,9 @@ candidate_funnel_plot
 
 
 
-This is a really good PI figure, because it prevents the misunderstanding that you only found four overlapping features.
-
 125. Calculate plant-only, fungus-only, and shared feature numbers
+
+```{r}
 plant_fungal_partition <- cross_compartment_presence %>%
   summarise(
 
@@ -6954,15 +6968,15 @@ plant_fungal_partition <- cross_compartment_presence %>%
   )
 
 plant_fungal_partition
+```
 
-This lets you tell Laura:
 
-“Of the filtered feature space, X were only reproducibly detected in the plant system, Y only in fungal-associated samples, and 2,124 occurred in both.”
 
 126. Plot the plant–fungus partition
 
 First reshape:
 
+```{r}
 plant_fungal_partition_long <-
   plant_fungal_partition %>%
   pivot_longer(
@@ -6989,8 +7003,12 @@ plant_fungal_partition_long <-
     )
   )
 
+```
+
+
 Plot:
 
+```{r}
 plant_fungal_partition_plot <- ggplot(
   plant_fungal_partition_long,
   aes(
@@ -7027,9 +7045,11 @@ plant_fungal_partition_plot <- ggplot(
   )
 
 plant_fungal_partition_plot
+```
+
+
 127. Pairwise overlap table across all eight biological compartments
 
-This will answer questions such as:
 
 How many features are shared between root and exudate?
 Root and fungal-in?
@@ -7038,6 +7058,7 @@ Fungal-in and old fungus?
 
 Create a logical matrix:
 
+```{r}
 presence_matrix <- cross_compartment_presence %>%
   select(
     Leaf = leaf_present,
@@ -7050,20 +7071,31 @@ presence_matrix <- cross_compartment_presence %>%
     Fungi_old = fungi_old_present
   )
 
+```
+
+
 Then:
 
+```{r}
 presence_matrix_numeric <-
   as.matrix(
     presence_matrix
   ) * 1
 
+```
+
+
 Calculate pairwise overlap:
 
+```{r}
 pairwise_overlap_matrix <-
   t(presence_matrix_numeric) %*%
   presence_matrix_numeric
 
 pairwise_overlap_matrix
+```
+
+
 
 This is a very important table.
 
@@ -7080,6 +7112,8 @@ Root × Exudate
 tells you exactly how many filtered features are reproducibly present in both.
 
 128. Make the overlap matrix into a heatmap
+
+```{r}
 pheatmap(
   pairwise_overlap_matrix,
   cluster_rows = FALSE,
@@ -7090,9 +7124,9 @@ pheatmap(
     "Shared LC-MS features among plant, soil and fungal compartments"
 )
 
-This may be one of the best overview figures for Laura.
+```
 
-It answers your question visually:
+
 
 Which sample types have the most chemistry in common?
 
@@ -7102,6 +7136,7 @@ Raw counts are useful, but percent overlap can also help.
 
 For each pair, use the smaller feature set as the denominator:
 
+```{r}
 pairwise_percent_overlap <-
   matrix(
     NA_real_,
@@ -7114,9 +7149,13 @@ rownames(pairwise_percent_overlap) <-
 
 colnames(pairwise_percent_overlap) <-
   colnames(presence_matrix_numeric)
+```
+
+
 
 Calculate:
 
+```{r}
 for (
   i in seq_len(
     ncol(presence_matrix_numeric)
@@ -7152,15 +7191,23 @@ for (
   }
 }
 
+```
+
+
 View:
 
+```{r}
 round(
   pairwise_percent_overlap,
   1
 )
+```
+
+
 
 Heatmap:
 
+```{r}
 pheatmap(
   pairwise_percent_overlap,
   cluster_rows = FALSE,
@@ -7170,6 +7217,9 @@ pheatmap(
   main =
     "Percent feature overlap among biological compartments"
 )
+```
+
+
 130. Plant-specific feature-pattern table
 
 Now summarize just:
@@ -7178,6 +7228,8 @@ Leaf
 Root
 Exudate
 Soil
+
+```{r}
 plant_pattern_detailed <- cross_compartment_presence %>%
   mutate(
 
@@ -7215,6 +7267,9 @@ plant_pattern_detailed <- cross_compartment_presence %>%
   )
 
 plant_pattern_detailed
+```
+
+
 
 This tells you how many features are:
 
@@ -7226,6 +7281,7 @@ Leaf + root + exudate
 Exudate + soil
 all four
 etc.
+
 131. Fungal-specific feature-pattern table
 
 Do the same for:
@@ -7234,6 +7290,8 @@ Fungal control
 Fungal out
 Fungal in
 Fungi old
+
+```{r}
 fungal_pattern_detailed <- cross_compartment_presence %>%
   mutate(
 
@@ -7272,17 +7330,18 @@ fungal_pattern_detailed <- cross_compartment_presence %>%
   )
 
 fungal_pattern_detailed
+```
+
+
 
 This is extremely useful for explaining fungal chemistry.
 
 You may find categories like:
 
-Control + Out + In + Old
-In + Old
-Out + In + Old
-In only
-Old only
+
 132. Plot the top fungal detection patterns
+
+```{r}
 fungal_pattern_plot_data <-
   fungal_pattern_detailed %>%
   filter(
@@ -7291,9 +7350,13 @@ fungal_pattern_plot_data <-
   slice_head(
     n = 15
   )
+```
+
+
 
 Plot:
 
+```{r}
 fungal_pattern_plot <- ggplot(
   fungal_pattern_plot_data,
   aes(
@@ -7324,7 +7387,12 @@ fungal_pattern_plot <- ggplot(
   theme_classic()
 
 fungal_pattern_plot
+```
+
+
 133. Plot the top plant detection patterns
+
+```{r}
 plant_pattern_plot_data <-
   plant_pattern_detailed %>%
   filter(
@@ -7363,10 +7431,14 @@ plant_pattern_plot <- ggplot(
   theme_classic()
 
 plant_pattern_plot
+```
+
+
 134. Strict cross-system candidate table
 
 These are the four, and this is where you explain exactly what “four” means.
 
+```{r}
 strict_cross_system_candidates <-
   root_exudate_fungal_not_controls %>%
 
@@ -7394,9 +7466,13 @@ strict_cross_system_candidates <-
   )
 
 strict_cross_system_candidates
+```
+
+
 
 Add a descriptive column:
 
+```{r}
 strict_cross_system_candidates <-
   strict_cross_system_candidates %>%
   mutate(
@@ -7404,10 +7480,14 @@ strict_cross_system_candidates <-
     interpretation =
       "Root + exudate + fungal-associated; not consistently detected in soil or fungal control"
   )
+```
+
+
 135. Cross-system candidate boxplots
 
 You've already generated this, but save a presentation-quality copy:
 
+```{r}
 cross_system_candidate_plot <- ggplot(
   cross_candidate_plot_data,
   aes(
@@ -7465,9 +7545,14 @@ cross_system_candidate_plot <- ggplot(
   )
 
 cross_system_candidate_plot
+```
+
 
 Save:
 
+
+
+```{r}
 ggsave(
   "PI_figure_cross_system_candidates.png",
   cross_system_candidate_plot,
@@ -7475,6 +7560,9 @@ ggsave(
   height = 8,
   dpi = 300
 )
+```
+
+
 136. Summarize exudate-vs-soil detection evidence
 
 You already obtained:
@@ -7486,15 +7574,20 @@ You already obtained:
 
 Let's turn that into a PI figure.
 
+```{r}
 exudate_soil_detection_PI <-
   prepared_comparisons$
     Exudate_vs_Soil$
     detection_summary
 
 exudate_soil_detection_PI
+```
+
+
 
 Plot:
 
+```{r}
 exudate_soil_detection_plot <- ggplot(
   exudate_soil_detection_PI,
   aes(
@@ -7542,6 +7635,9 @@ exudate_soil_detection_plot <- ggplot(
   )
 
 exudate_soil_detection_plot
+```
+
+
 137. Exudate-vs-soil quantitative evidence tiers
 
 You already obtained:
@@ -7553,6 +7649,7 @@ Tier 5   1011
 
 Generate the table:
 
+```{r}
 exudate_evidence_summary <-
   exudate_soil_abundance_candidates %>%
   count(
@@ -7560,9 +7657,13 @@ exudate_evidence_summary <-
   )
 
 exudate_evidence_summary
+```
+
+
 
 Plot:
 
+```{r}
 exudate_evidence_plot <- ggplot(
   exudate_evidence_summary,
   aes(
@@ -7600,6 +7701,9 @@ exudate_evidence_plot <- ggplot(
   )
 
 exudate_evidence_plot
+```
+
+
 138. Fungal-age summary figure
 
 Your current numbers are:
@@ -7612,10 +7716,15 @@ Old-vs-control only               6
 
 Use your actual object:
 
+```{r}
 fungal_age_summary
+```
+
+
 
 Plot:
 
+```{r}
 fungal_age_summary_plot <- ggplot(
   fungal_age_summary,
   aes(
@@ -7653,10 +7762,14 @@ fungal_age_summary_plot <- ggplot(
   )
 
 fungal_age_summary_plot
+```
+
+
 139. Fungal-age heatmap
 
 You already generated this. Save it explicitly when you rerun the heatmap:
 
+```{r}
 png(
   "PI_figure_fungal_age_heatmap.png",
   width = 2200,
@@ -7681,12 +7794,16 @@ pheatmap(
 )
 
 dev.off()
+```
+
+
 140. Fungal top-feature boxplots
 
 Your top fungal-age plot is useful because the heatmap only shows relative differences.
 
 Save the boxplot:
 
+```{r}
 fungal_age_boxplot <- ggplot(
   top_fungal_plot_data,
   aes(
@@ -7739,12 +7856,16 @@ fungal_age_boxplot <- ggplot(
   )
 
 fungal_age_boxplot
+```
+
+
 141. PCA plots to save for Laura
 
 You already have these objects, so don't rerun the entire PCA.
 
 Save the broad PCA:
 
+```{r}
 ggsave(
   "PI_figure_global_PCA.png",
   broad_pca_plot,
@@ -7753,8 +7874,12 @@ ggsave(
   dpi = 300
 )
 
+```
+
+
 Exudate vs soil:
 
+```{r}
 ggsave(
   "PI_figure_exudate_soil_PCA.png",
   quantitative_pca_results$
@@ -7763,9 +7888,13 @@ ggsave(
   height = 6,
   dpi = 300
 )
+```
+
+
 
 Leaf vs root:
 
+```{r}
 ggsave(
   "PI_figure_leaf_root_PCA.png",
   quantitative_pca_results$
@@ -7774,9 +7903,13 @@ ggsave(
   height = 6,
   dpi = 300
 )
+```
+
+
 
 Fungal in vs control:
 
+```{r}
 ggsave(
   "PI_figure_fungal_in_control_PCA.png",
   quantitative_pca_results$
@@ -7785,9 +7918,13 @@ ggsave(
   height = 6,
   dpi = 300
 )
+```
+
+
 
 Old vs new fungus:
 
+```{r}
 ggsave(
   "PI_figure_fungal_old_new_PCA.png",
   quantitative_pca_results$
@@ -7796,10 +7933,12 @@ ggsave(
   height = 6,
   dpi = 300
 )
+```
+
+
 142. Create one master PI summary table
 
-This gives Laura the major numbers without needing to interpret your entire R notebook.
-
+```{r}
 PI_summary_table <- tibble(
 
   result = c(
@@ -7882,9 +8021,13 @@ PI_summary_table <- tibble(
 )
 
 PI_summary_table
+```
+
+
 
 I would not hard-code 129 and 1386 long term, though. For a reproducible final notebook, replace them with calculations:
 
+```{r}
 PI_summary_table <- tibble(
 
   result = c(
@@ -7965,15 +8108,24 @@ PI_summary_table <- tibble(
 )
 
 PI_summary_table
+```
+
+
 
 Save:
 
+```{r}
 write.csv(
   PI_summary_table,
   "PI_positive_mode_results_summary.csv",
   row.names = FALSE
 )
+```
+
+
 143. Save all the new PI tables
+
+```{r}
 write.csv(
   compartment_feature_counts,
   "PI_feature_counts_by_compartment.csv",
@@ -8019,3 +8171,10 @@ write.csv(
   "PI_strict_cross_system_candidates.csv",
   row.names = FALSE
 )
+```
+
+
+```{r}
+rsconnect::writeManifest()
+```
+

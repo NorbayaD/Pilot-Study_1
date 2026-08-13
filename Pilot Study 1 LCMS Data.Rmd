@@ -7,12 +7,7 @@ date: "2026-08-10"
 ---
 
 
-1. Packages
-
-Don't repeatedly run install.packages() every time you knit the document. Install once in the Console if needed:
-
-
-Then your R Markdown only needs:
+## 1. load packages
 
 ```{r}
 library(readxl)
@@ -26,11 +21,16 @@ library(pheatmap)
 ```
 
 
-2. Import positive-mode MS-DIAL data
+#2. Import positive-mode MS-DIAL data
 
 ```{r}
 file_path <- "C:/Users/norba/Downloads/postive mode height.xlsx"
+```
 
+#2. read positive 
+_dim shows how big the data is
+_names show the names of the columns
+```{r}
 msdial <- read_excel(
   path = file_path,
   sheet = "postive mode height",
@@ -42,9 +42,9 @@ names(msdial)
 ```
 
 
-3. Identify sample-intensity columns
+#3. Identify sample-intensity columns
 
-These are the columns containing the actual MS-DIAL feature peak heights.
+_These are the columns containing the actual MS-DIAL feature peak heights.
 
 ```{r}
 sample_columns <- c(
@@ -62,8 +62,10 @@ sample_columns <- c(
 
 
 
-Safety check:
+#Safety check: making sure every expected sample column exists
+#can use setdiff() to know what column is missing from one set to the other
 
+#validation step
 ```{r}
 stopifnot(
   all(sample_columns %in% names(msdial))
@@ -71,16 +73,17 @@ stopifnot(
 ```
 
 
-
-There should be 28 injections total:
-
+#how many elements are contained in this object?
 ```{r}
 length(sample_columns)
 
 ```
 
+#can inspect data with other functions including head(), str(), summary()
 
-4. Make sure intensities are numeric
+#features include: alignment ID, average RT(min), average m/z, metabolite name, adduct type, ms/ms assigned
+
+#4. Make sure intensities are numeric
 
 ```{r}
 msdial <- msdial %>%
@@ -103,9 +106,9 @@ sapply(
 ```
 
 
-These should be numeric.
 
-5. Create sample metadata
+#5. Create sample metadata
+#note: \d= digit, += one or more, $=end of string
 
 This tells R what each sample actually represents biologically.
 
@@ -184,15 +187,13 @@ sample_metadata <- tibble(
 ```
 
 
-Check it:
+#Check it: view table
 
 ```{r}
 sample_metadata
 ```
 
-
-
-And:
+#And: how many replicates for each group
 
 ```{r}
 sample_metadata %>%
@@ -200,17 +201,9 @@ sample_metadata %>%
 ```
 
 
-You expect eight biological groups with three replicates each, plus four blanks. Your original metadata assignment already establishes these groups.
-
-6. Initial sample-level QC
-
-Here we haven't filtered anything yet.
-
-Calculate:
-
-number of features with nonzero peak height;
-sum of detected MS-DIAL feature peak heights.
-sum of MS-DIAL feature peak heights, not the raw LC-MS total ion chromatogram.
+#6. Initial sample-level QC
+_no filtering yet
+#Calculate: number of features with nonzero peak height; sum of detected MS-DIAL feature peak heights. sum of MS-DIAL feature peak heights, not the raw LC-MS total ion chromatogram.
 
 ```{r}
 sample_qc <- tibble(
@@ -243,7 +236,7 @@ sample_qc
 
 
 
-7. Find failed/empty injections
+#7. Find failed/empty injections
 ```{r}
 sample_qc %>%
   filter(
@@ -254,8 +247,7 @@ sample_qc %>%
 
 
 
-
-8. Plot summed feature signal
+#8. Plot summed feature signal
 ```{r}
 signal_plot <- ggplot(
   sample_qc,
@@ -287,7 +279,7 @@ signal_plot
 ```
 
 
-9. Plot number of detected features
+#9. Plot number of detected features based on peak heights above 0
 
 ```{r}
 feature_count_plot <- ggplot(
@@ -321,7 +313,7 @@ feature_count_plot
 ```
 
 
-10. Calculate replicate QC and CV
+#10. Calculate replicate QC and CV, cv BEING COEFFICIENT OF VARIATION. CV measures how variable a group is relative to its mean. Lower= replicates are consistent relative to their average. High= more variability across replicates. 
 ```{r}
 group_qc_summary <- sample_qc %>%
   filter(
@@ -362,18 +354,13 @@ group_qc_summary
 
 
 
-11. Build the quantitative feature table
+#11. Build the quantitative feature table
+_Now we shift from:
+_What does each sample look like overall?
+_to:
+_What happened to each individual LC-MS feature?
 
-Now we shift from:
-
-What does each sample look like overall?
-
-to:
-
-What happened to each individual LC-MS feature?
-
-I would keep more annotation information now because we'll need it later.
-
+#create a smaller analysis focused table by choosing coloumns: core feature information first, 
 ```{r}
 feature_table <- msdial %>%
   select(
@@ -411,7 +398,14 @@ feature_table <- msdial %>%
 ```
 
 
-12. Give every feature a readable unique name
+#12. Give every feature a readable unique name
+_Example:
+_F1540_mz187.1078_rt0.74
+_means:
+_MS-DIAL Alignment ID = 1540
+_m/z ≈ 187.1078
+_RT ≈ 0.74 min
+
 ```{r}
 feature_table <- feature_table %>%
   mutate(
@@ -438,18 +432,8 @@ feature_table <- feature_table %>%
 
 
 
-Example:
 
-F1540_mz187.1078_rt0.74
-
-means:
-
-MS-DIAL Alignment ID = 1540
-m/z ≈ 187.1078
-RT ≈ 0.74 min
-
-
-13. Define usable blanks and biological samples
+#13. Define usable blanks and biological samples
 ```{r}
 valid_blank_columns <- c(
   "blank_1",
@@ -467,8 +451,7 @@ biological_columns <- setdiff(
 ```
 
 
-
-Check:
+#Check:
 
 ```{r}
 length(biological_columns)
@@ -476,7 +459,11 @@ length(biological_columns)
 
 
 
-14. Calculate blank/background information for every feature
+#14. Calculate blank/background information for every feature. Background screening step. Essentially, how strong is this feature in biological samples compared with the blanks? Searching for at least 1 biological condition far above the background. Limited because of skewing. A sample could have a feature signal of 0, 0, 10,000.
+
+#blank filter: is the signal sufficiently above analytical background somewhere?
+
+#different from a prevalence filter: is the signal reproduciply detected in a biological sample?
 
 ```{r}
 feature_qc <- feature_table %>%
@@ -495,14 +482,14 @@ feature_qc <- feature_table %>%
           all_of(biological_columns)
         )
       ),
-      1,
-      max,
+      1, #operate across rows (margin) 1=row, 2-coloumn
+      max, #return the largest value (function)
       na.rm = TRUE
     ),
 
     sample_to_blank_ratio =
       (
-        maximum_biological_signal + 1
+        maximum_biological_signal + 1 #prevents division by zeros
       ) /
       (
         blank_mean + 1
@@ -511,9 +498,8 @@ feature_qc <- feature_table %>%
 ```
 
 
-15. Examine different blank thresholds
-
-Before filtering, save a copy:
+#15. Examine different blank thresholds
+#Before filtering, save a copy:
 
 ```{r}
 feature_qc_unfiltered <- feature_qc
@@ -522,7 +508,7 @@ feature_qc_unfiltered <- feature_qc
 
 
 
-Then compare 3×, 5× and 10×:
+#Then compare 3×, 5× and 10×: Is the ratio between blank and feature signals 3x? 5x? 10x? Does my retained feature set change dramatically if I make the background rule stricter?
 
 ```{r}
 blank_filter_summary <- tibble(
@@ -560,7 +546,7 @@ blank_filter_summary
 ```
 
 
-For our main exploratory analysis:
+#For our main exploratory analysis: use the threshold of 5x. Taje unfiltered feature table, keep only features whose maximum biological signal is at least 5x that of their blank mean signal.
 
 ```{r}
 feature_qc <- feature_qc_unfiltered %>%
@@ -571,9 +557,7 @@ feature_qc <- feature_qc_unfiltered %>%
 
 
 
-This preserves the 5× choice you've already used.
-
-16. Group-aware prevalence filter
+#16. Group-aware prevalence filter
 
 ```{r}
 group_columns <- list(
@@ -629,10 +613,9 @@ group_columns <- list(
 
 ```
 
-The group-specific rule is better.
 
 
-Calculate detection:
+#Calculate detection for features above 0 for each group. For each feature and each sample group, was that feature detected in at least 2 samples?
 
 ```{r}
 presence_by_group <- sapply(
@@ -653,7 +636,7 @@ presence_by_group <- sapply(
 
 
 
-Keep features detected in at least 2 of 3 replicates in at least one biological group:
+#Keep features detected in at least 2 of 3 replicates in at least one biological group:
 
 ```{r}
 feature_qc$present_in_any_group <-
@@ -671,7 +654,7 @@ feature_qc <- feature_qc %>%
 
 
 
-Now calculate overall detection count just for reporting:
+#calculate overall detection count just for reporting:
 
 ```{r}
 feature_qc <- feature_qc %>%
@@ -691,7 +674,7 @@ feature_qc <- feature_qc %>%
 
 
 
-Check filtering:
+#Check filtering: original feature table and filtered feature table
 
 ```{r}
 nrow(feature_table)
@@ -700,7 +683,7 @@ nrow(feature_qc)
 
 
 
-17. Build the PCA intensity matrix
+#17. Build the PCA intensity matrix
 
 
 ```{r}
@@ -717,7 +700,7 @@ intensity_matrix <- feature_qc %>%
 ```
 
 
-Transpose:
+#Transpose:rows = samples, columns = LC-MS features.
 
 ```{r}
 pca_matrix_raw <- t(
@@ -728,15 +711,9 @@ dim(pca_matrix_raw)
 ```
 
 
+#18. Replace zeros
 
-Now:
-
-rows = samples
-columns = LC-MS features.
-
-18. Replace zeros
-
-For PCA only, replace zeros/missing values with half of that feature's smallest positive measurement.
+#For PCA only, replace zeros/missing values with half of that feature's smallest positive measurement.
 ```{r}
 replace_zero_half_min <- function(x) {
 
@@ -772,7 +749,7 @@ replace_zero_half_min <- function(x) {
 ```
 
 
-Apply:
+#Apply:
 
 ```{r}
 pca_matrix_imputed <- apply(
@@ -784,7 +761,7 @@ pca_matrix_imputed <- apply(
 
 
 
-Remove anything that still cannot be analyzed:
+#Remove anything that still cannot be analyzed:
 
 ```{r}
 pca_matrix_imputed <-
@@ -800,13 +777,7 @@ pca_matrix_imputed <-
 ```
 
 
-19. Median normalize
-
-We're choosing one normalization method for this pipeline.
-
-Your previous code calculated median normalization and TIC normalization but then only used median normalization.
-
-So remove the unused TIC block.
+#19. Median normalize: one normalization method for this pipeline. Calculate one median intensity for each sample, then take the median of all sample medians for target scaling, then sweep or apply the operation acorss a matrix. Rescale every sample so its overall median intensity is comparable with the overall dataset median. for samples.
 
 ```{r}
 sample_medians <- apply(
@@ -830,7 +801,7 @@ pca_matrix_normalized <- sweep(
 ```
 
 
-20. Log2 transformation
+#20. Log2 transformation to compress the scale. for features.
 
 ```{r}
 pca_matrix_log <- log2(
@@ -839,7 +810,7 @@ pca_matrix_log <- log2(
 ```
 
 
-21. Remove zero-variance features
+#21. Remove zero-variance features
 
 ```{r}
 feature_variance <- apply(
@@ -864,7 +835,7 @@ pca_matrix_log <-
 ```
 
 
-22. Run broad PCA
+#22. Run broad PCA
 
 ```{r}
 pca_result <- prcomp(
@@ -877,7 +848,7 @@ summary(pca_result)
 ```
 
 
-23. Variance explained
+#23. Variance explained
 ```{r}
 variance_explained <-
   (
@@ -892,7 +863,7 @@ variance_explained[1:10]
 
 
 
-Create table:
+#Create table:
 
 ```{r}
 variance_table <- tibble(
@@ -920,7 +891,7 @@ head(
 ```
 
 
-24. PCA sample scores
+#24. PCA sample scores
 
 ```{r}
 pca_scores <-
@@ -938,7 +909,7 @@ pca_scores <-
 
 
   
-25. Broad PC1 versus PC2 plot
+#25. Broad PC1 versus PC2 plot
 
 ```{r}
 broad_pca_plot <- ggplot(
@@ -997,7 +968,7 @@ broad_pca_plot
 ```
 
 
-26. PC1 vs PC3
+#26. PC1 vs PC3
 ```{r}
 pc1_pc3_plot <- ggplot(
   pca_scores,
@@ -1046,7 +1017,7 @@ pc1_pc3_plot
 ```
 
 
-27. Scree plot
+#27. Scree plot. post creating new dimensions of the LC-MS features, the scree plot tells us how much of the total variation in my LC-MS dataset it explained by each principal component? Essentially asks, how much variation does each PC explain?
 
 ```{r}
 scree_plot <- variance_table %>%
@@ -1080,9 +1051,9 @@ scree_plot
 ```
 
 
-28. Create reusable focused-PCA function
+#28. Create reusable focused-PCA function: instead of writing 50 lines three times, you write them once and change only the inputs
 
-Instead of repeating the same code three times:
+#Instead of repeating the same code three times. This code chunk is programming a function that can be used in another code.
 ```{r}
 run_focused_pca <- function(
     groups_to_use,
@@ -1193,7 +1164,7 @@ run_focused_pca <- function(
 ```
 
 
-29. Exudate versus soil PCA
+#29. Exudate versus soil PCA
 ```{r}
 exudate_soil_pca <-
   run_focused_pca(
@@ -1209,7 +1180,7 @@ exudate_soil_pca$plot
 ```
 
 
-30. Fungal agar PCA
+#30. Fungal agar PCA
 
 
 ```{r}
@@ -1228,7 +1199,7 @@ fungal_pca$plot
 ```
 
 
-31. Leaf versus root PCA
+#31. Leaf versus root PCA
 
 ```{r}
 tissue_pca <-
@@ -1245,7 +1216,7 @@ tissue_pca$plot
 ```
 
 
-32. Extract PCA loadings
+#32. Extract PCA loadings. PCA loadings essentially asks, which features are driving those directions?
 
 ```{r}
 pca_loadings <-
@@ -1259,7 +1230,7 @@ pca_loadings <-
 
 
 
-Create annotation table:
+#Create annotation table:
 
 ```{r}
 feature_annotations <- feature_qc %>%
@@ -1296,7 +1267,7 @@ feature_annotations <- feature_qc %>%
 ```
 
 
-Join:
+#Join:
 
 
 ```{r}
@@ -1308,9 +1279,9 @@ pca_loadings <- pca_loadings %>%
 ```
 
 
-33. Identify strongest PC1, PC2 and PC3 features
+#33. Identify strongest PC1, PC2 and PC3 features. Which 30 LC-MS features have the strongest relationship with this PCA axis? Scores are samples, loadings are features. 
 
-Reusable function:
+#Reusable function: top 30, focused interpretation.visualization
 
 ```{r}
 get_top_loadings <- function(
@@ -1341,8 +1312,7 @@ get_top_loadings <- function(
 ```
 
 
-
-Run:
+#Run:
 
 ```{r}
 
@@ -1366,7 +1336,7 @@ top_pc3_loadings <-
 
 ```
 
-Inspect:
+#Inspect:
 
 ```{r}
 top_pc1_loadings %>%
@@ -1385,7 +1355,7 @@ top_pc1_loadings %>%
 
 
 
-And:
+#And:
 
 ```{r}
 top_pc2_loadings %>%
@@ -1402,17 +1372,104 @@ top_pc2_loadings %>%
   )
 ```
 
-
-34. Check suspicious very-early RT loadings
-
-This is important because we previously noticed many high-loading features around RT 0.4–0.8 min.
-
-Don't automatically delete them yet.
-
-Quantify them first:
+#Reusable function: top 100, broad interpretation/visualization
 
 ```{r}
-pca_loadings %>%
+get_top_loadings100 <- function(
+    loading_table,
+    pc_column,
+    number_to_keep = 100
+) {
+
+  loading_table %>%
+    mutate(
+      selected_loading =
+        .data[[pc_column]],
+
+      absolute_loading =
+        abs(
+          .data[[pc_column]]
+        )
+    ) %>%
+    arrange(
+      desc(
+        absolute_loading
+      )
+    ) %>%
+    slice_head(
+      n = number_to_keep
+    )
+}
+```
+
+
+#Run:
+
+```{r}
+
+top_pc1_loadings100 <-
+  get_top_loadings100(
+    pca_loadings,
+    "PC1"
+  )
+
+top_pc2_loadings100 <-
+  get_top_loadings100(
+    pca_loadings,
+    "PC2"
+  )
+
+top_pc3_loadings100 <-
+  get_top_loadings100(
+    pca_loadings,
+    "PC3"
+  )
+
+```
+
+#Inspect:
+
+```{r}
+top_pc1_loadings100 %>%
+  select(
+    feature_name,
+    PC1,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    `Total score`,
+    sample_to_blank_ratio
+  )
+```
+
+#And:
+```{r}
+top_pc2_loadings100 %>%
+  select(
+    feature_name,
+    PC2,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    `Total score`,
+    sample_to_blank_ratio
+  )
+```
+
+#34 quality control
+
+#34A. Check suspicious very-early RT loadings. Many high-loading features occur around RT 0.4–0.8 min. Could indicate potential loss of anlyte retention, co-elution with interfering matrix components, or system faults like phase mismatch, flow instability, and column degradation. 
+
+#Quantify early-RT features among the top 100 PC1/PC2 drivers
+#rank by strongest PC1 or PC2 loading, take the top 100, how many have RT <1min?
+
+```{r}
+
+early_rt_summary <- pca_loadings %>%
   mutate(
     important_PC12 =
       pmax(
@@ -1433,13 +1490,67 @@ pca_loadings %>%
       `Average Rt(min)` < 1
   )
 
+early_rt_summary
 ```
-
-
-And inspect:
+# 34B. Save and inspect the top 100 PC1/PC2 drivers 
+#which of those major PCA drivers how RT <1MIN?
 
 ```{r}
-pca_loadings %>%
+early_rt_top100 <- pca_loadings %>%
+  mutate(
+    important_PC12 =
+      pmax(
+        abs(PC1),
+        abs(PC2)
+      )
+  ) %>%
+  arrange(
+    desc(
+      important_PC12
+    )
+  ) %>%
+  slice_head(
+    n = 100
+  ) %>%
+  mutate(
+    early_RT =
+      `Average Rt(min)` < 1
+  )
+
+# Confirm the early-RT counts
+
+early_rt_top100 %>%
+  count(
+    early_RT
+  )
+
+
+# Inspect only the early-RT features among the top 100 PCA drivers
+
+early_rt_top100 %>%
+  filter(
+    early_RT
+  ) %>%
+  select(
+    feature_name,
+    `Average Rt(min)`,
+    `Average Mz`,
+    `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
+    PC1,
+    PC2,
+    important_PC12,
+    sample_to_blank_ratio
+  )
+```
+
+# 34C. Find the 30 strongest PC1-loading features among
+#      ALL features with RT < 1 min
+#start with all RT <1MIN features, which 30 most strongly drive PC1? Also examine their blank ratios. 
+
+```{r}
+early_rt_pc1_top30 <- pca_loadings %>%
   filter(
     `Average Rt(min)` < 1
   ) %>%
@@ -1453,18 +1564,22 @@ pca_loadings %>%
     `Average Rt(min)`,
     `Average Mz`,
     `Metabolite name`,
+    `Adduct type`,
+    `MS/MS assigned`,
     PC1,
     PC2,
     sample_to_blank_ratio
   ) %>%
-  head(30)
+  slice_head(
+    n = 30
+  )
+
+early_rt_pc1_top30
 ```
 
 
 
-This should happen before interpreting PCA-driving metabolites.
-
-35. Create combined PCA candidate table
+#35. Create combined PCA candidate table. It is a master ranking of PCA-important features across PC1, PC2, PC3. Essential question: which LC-MS features contribute most strongly to any of the first three principal components? For example, a feature with no PC1 loading but a huge PC3 loading could still be important. *Does not weight a loading by how much variance its PC explains. 
 
 ```{r}
 important_pca_features <-
@@ -1489,7 +1604,7 @@ important_pca_features <-
 ```
 
 
-Inspect top 50:
+#Inspect top 50: the strongest PCA contributors according to this particular ranking criterion. Across PC1-PC3 generally, which features are the major PCA contributors?
 
 ```{r}
 important_pca_features %>%
@@ -1499,9 +1614,9 @@ important_pca_features %>%
 ```
 
 
-36. PCA feature heatmap
+#36. PCA feature heatmap. Essential question, for the top 30 PCA-driving LC-MS features, what does their intensity pattern actually look like across all of my samples? 
 
-Since the annotated pheatmap continues to fail and the unannotated version works, leave the annotation problem alone for now. It is not blocking the analysis.
+#issues with annotation heatmap, will revisit. 
 
 ```{r}
 top_feature_names <-
@@ -1525,7 +1640,7 @@ heatmap_matrix <-
 ```
 
 
-Plot:
+#Plot: Top 30 features are the most strong contributors to the major multivariate PCA patterns. Essential question: how do the strongest PCA-driving features vary acorss my samples?
 ```{r}
 pheatmap(
   heatmap_matrix,
@@ -1545,16 +1660,1587 @@ pheatmap(
 )
 
 ```
+#36 additional
+
+#PCA Feature-reduction/sensitivity analysis 
+#alternative to a relatively small subset of strongly contributing features recapitulates much of the multivariate structure to: the chemical differences are distributed across many features rather than being driven by a small handful of ions. We want to know if biological/sample structure is retained or changes. 
 
 
-Your previous unannotated heatmap is the one that successfully rendered.
+## 36. PCA feature-reduction / sensitivity analysis
+#
+# Goal:
+# Start with the PCA-ranked features and progressively reduce the
+# number of features used in PCA.
+#
+# This asks:
+# 1. Does the overall sample structure remain similar?
+# 2. How much variance do PC1 and PC2 explain at each feature count?
+# 3. At what point does the PCA structure noticeably change?
+# 4. Which features remain strong contributors after PCA is recalculated?
+
+# NOTE:
+# This is exploratory sensitivity analysis.
+# The features are initially ranked using the full PCA, so preservation
+# of structure is not independent validation.
 
 
-37. Presence/absence analysis across biological groups
+```{r}
 
-Use feature_qc, not the imputed PCA matrix. Presence/absence must be based on actual observed peak heights.
+# 36A. Define feature-set sizes
+# ------------------------------------------------------------
 
-First define all sample groups:
+feature_set_sizes <- c(
+  ncol(pca_matrix_log),  # all available PCA features
+  2000,
+  1000,
+  500,
+  200,
+  100,
+  50,
+  30,
+  20,
+  10
+)
+
+# Remove sizes larger than the number of available features
+# and remove duplicates
+
+feature_set_sizes <-
+  feature_set_sizes[
+    feature_set_sizes <=
+      ncol(pca_matrix_log)
+  ] %>%
+  unique()
+
+feature_set_sizes
+```
+#36B. Function to rerun PCA using a selected number of highly ranked PCA features. Essentially, we're creating a reusable function that reruns PCA for each reduced feature set.
+
+```{r}
+
+run_reduced_feature_pca <- function(
+    number_features,
+    ranked_feature_table,
+    matrix_to_use,
+    metadata
+) {
+
+  # If asking for all features, keep everything available
+  if (
+    number_features >=
+      ncol(matrix_to_use)
+  ) {
+
+    selected_features <-
+      colnames(matrix_to_use)
+
+  } else {
+
+    selected_features <-
+      ranked_feature_table %>%
+      filter(
+        feature_name %in%
+          colnames(matrix_to_use)
+      ) %>%
+      slice_head(
+        n = number_features
+      ) %>%
+      pull(
+        feature_name
+      )
+  }
+
+
+  # Subset matrix to selected features
+
+  reduced_matrix <-
+    matrix_to_use[
+      ,
+      selected_features,
+      drop = FALSE
+    ]
+
+
+  # Recheck variance because some selected features could
+  # become non-variable in a subset
+
+  reduced_variance <-
+    apply(
+      reduced_matrix,
+      2,
+      var,
+      na.rm = TRUE
+    )
+
+  reduced_matrix <-
+    reduced_matrix[
+      ,
+      is.finite(
+        reduced_variance
+      ) &
+        reduced_variance > 0,
+      drop = FALSE
+    ]
+
+
+  # Run PCA again
+
+  reduced_pca <-
+    prcomp(
+      reduced_matrix,
+      center = TRUE,
+      scale. = TRUE
+    )
+
+
+  # Calculate variance explained
+
+  variance_percent <-
+    (
+      reduced_pca$sdev^2 /
+        sum(
+          reduced_pca$sdev^2
+        )
+    ) * 100
+
+
+  # Extract sample scores
+
+  reduced_scores <-
+    as.data.frame(
+      reduced_pca$x
+    ) %>%
+    rownames_to_column(
+      "sample"
+    ) %>%
+    left_join(
+      metadata,
+      by = "sample"
+    )
+
+
+  # Extract loadings from the NEW PCA
+
+  reduced_loadings <-
+    as.data.frame(
+      reduced_pca$rotation
+    ) %>%
+    rownames_to_column(
+      "feature_name"
+    ) %>%
+    mutate(
+
+      maximum_absolute_loading =
+        pmax(
+          abs(PC1),
+          abs(PC2),
+          abs(PC3),
+          na.rm = TRUE
+        )
+    ) %>%
+    arrange(
+      desc(
+        maximum_absolute_loading
+      )
+    )
+
+
+  # Create PCA plot
+
+  reduced_plot <-
+    ggplot(
+      reduced_scores,
+      aes(
+        x = PC1,
+        y = PC2,
+        fill = group
+      )
+    ) +
+
+    geom_point(
+      shape = 21,
+      size = 4,
+      color = "black"
+    ) +
+
+    geom_text_repel(
+      aes(
+        label = sample
+      ),
+      size = 3
+    ) +
+
+    labs(
+
+      title =
+        paste0(
+          "PCA using top ",
+          ncol(reduced_matrix),
+          " features"
+        ),
+
+      x =
+        paste0(
+          "PC1 (",
+          round(
+            variance_percent[1],
+            1
+          ),
+          "%)"
+        ),
+
+      y =
+        paste0(
+          "PC2 (",
+          round(
+            variance_percent[2],
+            1
+          ),
+          "%)"
+        )
+    ) +
+
+    theme_classic()
+
+
+  # Return all useful objects
+
+  list(
+
+    requested_features =
+      number_features,
+
+    actual_features =
+      ncol(
+        reduced_matrix
+      ),
+
+    selected_features =
+      colnames(
+        reduced_matrix
+      ),
+
+    pca =
+      reduced_pca,
+
+    scores =
+      reduced_scores,
+
+    loadings =
+      reduced_loadings,
+
+    variance =
+      variance_percent,
+
+    plot =
+      reduced_plot
+  )
+}
+```
+
+
+# 36C. Run PCA across progressively smaller feature sets. Essentially, run that function for every feature-set size.
+
+```{r}
+reduced_pca_results <-
+  lapply(
+    feature_set_sizes,
+
+    function(n_features) {
+
+      run_reduced_feature_pca(
+
+        number_features =
+          n_features,
+
+        ranked_feature_table =
+          important_pca_features,
+
+        matrix_to_use =
+          pca_matrix_log,
+
+        metadata =
+          sample_metadata
+      )
+    }
+  )
+
+names(
+  reduced_pca_results
+) <-
+  paste0(
+    "Top_",
+    feature_set_sizes
+  )
+```
+
+
+
+#check
+```{r}
+names(
+  reduced_pca_results
+)
+```
+# 36D. Create variance summary table. summarize how the variance changes2.
+
+```{r}
+pca_reduction_summary <-
+  bind_rows(
+
+    lapply(
+      names(reduced_pca_results),
+
+      function(result_name) {
+
+        x <- reduced_pca_results[[result_name]]
+
+        tibble(
+
+          feature_set =
+            result_name,
+
+          requested_features =
+            x$requested_features,
+
+          actual_features =
+            x$actual_features,
+
+          PC1_percent =
+            x$variance[1],
+
+          PC2_percent =
+            x$variance[2],
+
+          PC3_percent =
+            x$variance[3],
+
+          PC1_PC2_percent =
+            x$variance[1] +
+            x$variance[2],
+
+          PC1_PC2_PC3_percent =
+            x$variance[1] +
+            x$variance[2] +
+            x$variance[3]
+        )
+      }
+    )
+  )
+
+pca_reduction_summary
+```
+## 36E. Plot PC1 and PC2 variance across feature-set sizes
+```{r}
+pca_reduction_variance_long <-
+  pca_reduction_summary %>%
+
+  select(
+    actual_features,
+    PC1_percent,
+    PC2_percent,
+    PC1_PC2_percent
+  ) %>%
+
+  pivot_longer(
+    cols =
+      c(
+        PC1_percent,
+        PC2_percent,
+        PC1_PC2_percent
+      ),
+    names_to =
+      "variance_measure",
+    values_to =
+      "percent"
+  )
+```
+
+#plot. essentially answers the question: as i reduce thousands of features toward 10, does the variance become increasingly concentrated in PC1/PC2?
+```{r}
+ggplot(
+  pca_reduction_variance_long,
+  aes(
+    x = actual_features,
+    y = percent,
+    group = variance_measure,
+    linetype = variance_measure
+  )
+) +
+
+  geom_point(
+    size = 3
+  ) +
+
+  geom_line() +
+
+  scale_x_log10() +
+
+  labs(
+    title =
+      "PCA variance across progressively reduced feature sets",
+
+    subtitle =
+      "Features ranked using strongest loading across PC1-PC3",
+
+    x =
+      "Number of features used in PCA (log scale)",
+
+    y =
+      "Variance explained (%)",
+
+    linetype =
+      NULL
+  ) +
+
+  theme_classic()
+```
+
+
+# 36F. Display selected reduced-feature PCA plots
+
+```{r}
+
+reduced_pca_results$Top_2000$plot
+
+reduced_pca_results$Top_1000$plot
+
+reduced_pca_results$Top_500$plot
+
+reduced_pca_results$Top_200$plot
+
+reduced_pca_results$Top_100$plot
+
+reduced_pca_results$Top_50$plot
+
+reduced_pca_results$Top_30$plot
+
+reduced_pca_results$Top_20$plot
+
+reduced_pca_results$Top_10$plot
+```
+
+
+```{r}
+reduced_pca_results[[1]]$plot
+```
+# 36G. Compare the strongest loadings after recalculating PCA. Inspect whether the newly calculated loadings remain similar as you reduce the feature set. 
+
+
+```{r}
+
+top_loadings_by_reduction <-
+  bind_rows(
+
+    lapply(
+      names(reduced_pca_results),
+
+      function(result_name) {
+
+        x <- reduced_pca_results[[result_name]]
+
+        x$loadings %>%
+
+          slice_head(
+            n = 20
+          ) %>%
+
+          mutate(
+            feature_set =
+              result_name
+          )
+      }
+    )
+  )
+
+top_loadings_by_reduction
+```
+
+
+
+# 36H. Identify features repeatedly appearing among top loadings. Count how often each feature appears among the top 20 loadings after PCA is recalculated.
+
+#a feature with times in the top20 at 8, is repeatedly appearing as a strong PCA contributor across many reduced PCAs. A feature with times in top 20=1 may be important only under one particular feature configuration.
+```{r}
+stable_pca_drivers <-
+  top_loadings_by_reduction %>%
+
+  count(
+    feature_name,
+    sort = TRUE,
+    name =
+      "times_in_top20"
+  )
+
+stable_pca_drivers
+```
+
+
+
+# 36I. Add feature annotation to stable PCA drivers. Join annotation information back into analysis. 
+```{r}
+
+stable_pca_drivers_annotated <-
+  stable_pca_drivers %>%
+
+  left_join(
+
+    feature_qc %>%
+      select(
+        feature_name,
+        `Average Rt(min)`,
+        `Average Mz`,
+        `Metabolite name`,
+        `Adduct type`,
+        `MS/MS assigned`,
+        Formula,
+        Ontology,
+        sample_to_blank_ratio
+      ),
+
+    by =
+      "feature_name"
+  )
+
+stable_pca_drivers_annotated %>%
+  slice_head(
+    n = 100
+  )
+```
+
+
+# 36J. Plot most stable PCA-driving features
+#create a simple stability plot
+```{r}
+stable_pca_driver_plot_data <-
+  stable_pca_drivers_annotated %>%
+  slice_head(
+    n = 30
+  )
+```
+
+
+#plot
+```{r}
+ggplot(
+  stable_pca_driver_plot_data,
+  aes(
+    x =
+      reorder(
+        feature_name,
+        times_in_top20
+      ),
+    y =
+      times_in_top20
+  )
+) +
+
+  geom_col() +
+
+  coord_flip() +
+
+  labs(
+    title =
+      "Features repeatedly driving PCA across feature reductions",
+
+    subtitle =
+      "Count of reduced PCA analyses in which each feature appeared among the top 20 loadings",
+
+    x =
+      NULL,
+
+    y =
+      "Number of PCA reductions"
+  ) +
+
+  theme_classic()
+```
+
+# 36K. Reusable heatmap function for reduced feature sets. Heat map. 
+```{r}
+
+plot_reduced_heatmap <- function(
+    number_to_plot,
+    title_text
+) {
+
+  feature_names <-
+    important_pca_features %>%
+
+    filter(
+      feature_name %in%
+        colnames(
+          pca_matrix_log
+        )
+    ) %>%
+
+    slice_head(
+      n = number_to_plot
+    ) %>%
+
+    pull(
+      feature_name
+    )
+
+
+  heatmap_data <-
+    t(
+      pca_matrix_log[
+        ,
+        feature_names,
+        drop = FALSE
+      ]
+    )
+
+
+  pheatmap(
+    heatmap_data,
+
+    scale =
+      "row",
+
+    clustering_distance_rows =
+      "euclidean",
+
+    clustering_distance_cols =
+      "euclidean",
+
+    clustering_method =
+      "complete",
+
+    show_rownames =
+      number_to_plot <= 100,
+
+    show_colnames =
+      TRUE,
+
+    fontsize_row =
+      ifelse(
+        number_to_plot <= 30,
+        7,
+        4
+      ),
+
+    main =
+      title_text
+  )
+}
+```
+
+
+# 36L. Heatmaps at progressively smaller feature sets
+```{r}
+
+plot_reduced_heatmap(
+  500,
+  "Top 500 PCA-driving features"
+)
+
+plot_reduced_heatmap(
+  100,
+  "Top 100 PCA-driving features"
+)
+
+plot_reduced_heatmap(
+  30,
+  "Top 30 PCA-driving features"
+)
+
+plot_reduced_heatmap(
+  10,
+  "Top 10 PCA-driving features"
+)
+```
+
+
+# 36M. Save feature-reduction results
+```{r}
+write.csv(
+  pca_reduction_summary,
+  "positive_mode_PCA_feature_reduction_summary.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  top_loadings_by_reduction,
+  "positive_mode_PCA_top_loadings_across_reductions.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  stable_pca_drivers_annotated,
+  "positive_mode_stable_PCA_drivers.csv",
+  row.names = FALSE
+)
+```
+
+
+# 36N. Function to calculate PCA sample-distance matrix
+#      using enough PCs to explain >= 80% of variance
+
+#essentially asking, how much of the original multivariate relationship among samples survives feature reduction? A Mantel permutation test gives us a p-value for the relationship between distance matrices. 
+```{r}
+
+get_pca_distance <- function(
+    pca_object,
+    variance_percent,
+    variance_cutoff = 80
+) {
+
+  cumulative_variance <-
+    cumsum(
+      variance_percent
+    )
+
+  number_pcs <-
+    which(
+      cumulative_variance >=
+        variance_cutoff
+    )[1]
+
+  scores_to_use <-
+    pca_object$x[
+      ,
+      seq_len(
+        number_pcs
+      ),
+      drop = FALSE
+    ]
+
+  dist(
+    scores_to_use,
+    method = "euclidean"
+  )
+}
+```
+
+
+#calculate the full-data reference
+```{r}
+full_result <-
+  reduced_pca_results[[1]]
+
+full_distance <-
+  get_pca_distance(
+    pca_object =
+      full_result$pca,
+
+    variance_percent =
+      full_result$variance,
+
+    variance_cutoff =
+      80
+  )
+```
+
+
+
+#correlate every reduced PCA with the full PCA. R=0.78 means that at 500 features, they are similar to the relationships in the full dataset
+```{r}
+pca_structure_correlations <-
+  bind_rows(
+
+    lapply(
+      names(
+        reduced_pca_results
+      ),
+
+      function(result_name) {
+
+        x <-
+          reduced_pca_results[[result_name]]
+
+        reduced_distance <-
+          get_pca_distance(
+            pca_object =
+              x$pca,
+
+            variance_percent =
+              x$variance,
+
+            variance_cutoff =
+              80
+          )
+
+        correlation <-
+          cor(
+            as.vector(
+              full_distance
+            ),
+
+            as.vector(
+              reduced_distance
+            ),
+
+            method =
+              "spearman"
+          )
+
+        tibble(
+
+          feature_set =
+            result_name,
+
+          actual_features =
+            x$actual_features,
+
+          distance_correlation =
+            correlation
+        )
+      }
+    )
+  )
+
+pca_structure_correlations
+```
+
+
+# 36P. Install/load vegan for Mantel permutation tests
+```{r}
+library(
+  vegan
+)
+```
+
+# 36Q. Mantel tests:
+#      Does each reduced PCA preserve the full-data
+#      sample-distance structure more than expected by chance?
+
+
+```{r}
+pca_structure_tests <-
+  bind_rows(
+
+    lapply(
+      names(
+        reduced_pca_results
+      ),
+
+      function(result_name) {
+
+        x <-
+          reduced_pca_results[[result_name]]
+
+        reduced_distance <-
+          get_pca_distance(
+            pca_object =
+              x$pca,
+
+            variance_percent =
+              x$variance,
+
+            variance_cutoff =
+              80
+          )
+
+        mantel_result <-
+          vegan::mantel(
+            full_distance,
+            reduced_distance,
+
+            method =
+              "spearman",
+
+            permutations =
+              9999
+          )
+
+        tibble(
+
+          feature_set =
+            result_name,
+
+          actual_features =
+            x$actual_features,
+
+          mantel_r =
+            unname(
+              mantel_result$statistic
+            ),
+
+          p_value =
+            mantel_result$signif
+        )
+      }
+    )
+  )
+
+pca_structure_tests
+```
+
+#does the top N PCA-driving feature set preserve the full metabolomic sample structure better than would be expected from randomly choosing N features?
+
+# 36N. Function to calculate sample-distance structure
+# from a PCA using enough PCs to explain >= 80% variance
+```{r}
+
+get_pca_distance <- function(
+    pca_object,
+    variance_percent,
+    variance_cutoff = 80
+) {
+
+  cumulative_variance <-
+    cumsum(
+      variance_percent
+    )
+
+  number_pcs <-
+    which(
+      cumulative_variance >=
+        variance_cutoff
+    )[1]
+
+  scores_to_use <-
+    pca_object$x[
+      ,
+      seq_len(number_pcs),
+      drop = FALSE
+    ]
+
+  dist(
+    scores_to_use,
+    method = "euclidean"
+  )
+}
+```
+
+
+
+
+# 36O. Create full-data reference distance matrix. Establish the full-feature PCA as the reference.
+
+```{r}
+
+full_result <-
+  reduced_pca_results[[1]]
+
+full_distance <-
+  get_pca_distance(
+    pca_object =
+      full_result$pca,
+
+    variance_percent =
+      full_result$variance,
+
+    variance_cutoff =
+      80
+  )
+
+full_distance
+```
+
+
+# 36P. Measure preservation of full PCA sample structure
+#      using Spearman correlation of pairwise distances
+
+```{r}
+pca_structure_correlations <-
+  bind_rows(
+
+    lapply(
+      names(reduced_pca_results),
+
+      function(result_name) {
+
+        x <-
+          reduced_pca_results[[result_name]]
+
+        reduced_distance <-
+          get_pca_distance(
+            pca_object =
+              x$pca,
+
+            variance_percent =
+              x$variance,
+
+            variance_cutoff =
+              80
+          )
+
+        structure_correlation <-
+          cor(
+            as.vector(full_distance),
+            as.vector(reduced_distance),
+            method = "spearman"
+          )
+
+        tibble(
+
+          feature_set =
+            result_name,
+
+          actual_features =
+            x$actual_features,
+
+          structure_correlation =
+            structure_correlation
+        )
+      }
+    )
+  )
+
+pca_structure_correlations
+```
+
+#correlation near 1
+→ reduced PCA preserves the full sample relationships very well
+
+correlation around 0.5
+→ moderate preservation
+
+correlation near 0
+→ reduced feature set no longer resembles the full structure
+
+# 36Q. Plot preservation of PCA structure as features decrease
+```{r}
+
+pca_structure_plot <-
+  ggplot(
+    pca_structure_correlations,
+    aes(
+      x = actual_features,
+      y = structure_correlation
+    )
+  ) +
+
+  geom_point(
+    size = 3
+  ) +
+
+  geom_line() +
+
+  scale_x_log10() +
+
+  labs(
+    title =
+      "Preservation of full PCA structure during feature reduction",
+
+    subtitle =
+      "Correlation of pairwise sample distances with the full-feature PCA",
+
+    x =
+      "Number of features used in PCA (log scale)",
+
+    y =
+      "Spearman correlation with full PCA"
+  ) +
+
+  theme_classic()
+
+pca_structure_plot
+```
+
+
+# 36R. Mantel permutation tests. Mantel test asks: are the pairwise sample relationships in this reduced PCA associated with the pairwise sample relationships in the full PCA?
+```{r}
+
+library(vegan)
+
+pca_structure_mantel <-
+  bind_rows(
+
+    lapply(
+      names(reduced_pca_results),
+
+      function(result_name) {
+
+        x <-
+          reduced_pca_results[[result_name]]
+
+        reduced_distance <-
+          get_pca_distance(
+            pca_object =
+              x$pca,
+
+            variance_percent =
+              x$variance,
+
+            variance_cutoff =
+              80
+          )
+
+        mantel_result <-
+          vegan::mantel(
+            full_distance,
+            reduced_distance,
+            method = "spearman",
+            permutations = 9999
+          )
+
+        tibble(
+
+          feature_set =
+            result_name,
+
+          actual_features =
+            x$actual_features,
+
+          mantel_r =
+            unname(
+              mantel_result$statistic
+            ),
+
+          mantel_p_value =
+            mantel_result$signif
+        )
+      }
+    )
+  )
+
+pca_structure_mantel
+```
+
+# 36S. Function to calculate PCA structure from a random
+# feature subset
+#essential question: if I randomly chose the same number of features, how well would they preserve the full PCA structure? First create a function that runs PCA on a random subset. 
+```{r}
+
+get_random_subset_correlation <- function(
+    number_features,
+    matrix_to_use,
+    full_distance,
+    variance_cutoff = 80
+) {
+
+  random_features <-
+    sample(
+      colnames(matrix_to_use),
+      size = number_features,
+      replace = FALSE
+    )
+
+  random_matrix <-
+    matrix_to_use[
+      ,
+      random_features,
+      drop = FALSE
+    ]
+
+  random_variance <-
+    apply(
+      random_matrix,
+      2,
+      var,
+      na.rm = TRUE
+    )
+
+  random_matrix <-
+    random_matrix[
+      ,
+      is.finite(random_variance) &
+        random_variance > 0,
+      drop = FALSE
+    ]
+
+  random_pca <-
+    prcomp(
+      random_matrix,
+      center = TRUE,
+      scale. = TRUE
+    )
+
+  random_variance_percent <-
+    (
+      random_pca$sdev^2 /
+        sum(random_pca$sdev^2)
+    ) * 100
+
+  random_distance <-
+    get_pca_distance(
+      pca_object =
+        random_pca,
+
+      variance_percent =
+        random_variance_percent,
+
+      variance_cutoff =
+        variance_cutoff
+    )
+
+  cor(
+    as.vector(full_distance),
+    as.vector(random_distance),
+    method = "spearman"
+  )
+}
+```
+
+
+# 36T. Feature sizes for random-subset permutation testing. Define the feature-set sizes for the randomization analysis. 
+```{r}
+
+permutation_feature_sizes <-
+  c(
+    2000,
+    1000,
+    500,
+    200,
+    100,
+    50,
+    30,
+    20,
+    10
+  )
+
+permutation_feature_sizes <-
+  permutation_feature_sizes[
+    permutation_feature_sizes <
+      ncol(pca_matrix_log)
+  ]
+
+permutation_feature_sizes
+```
+```{r}
+number_permutations <- 1000
+```
+
+
+
+# 36U. Run random feature-set permutations
+```{r}
+set.seed(123)
+
+random_structure_results <-
+  bind_rows(
+
+    lapply(
+      permutation_feature_sizes,
+
+      function(n_features) {
+
+        random_correlations <-
+          replicate(
+
+            number_permutations,
+
+            get_random_subset_correlation(
+              number_features =
+                n_features,
+
+              matrix_to_use =
+                pca_matrix_log,
+
+              full_distance =
+                full_distance,
+
+              variance_cutoff =
+                80
+            )
+          )
+
+        tibble(
+
+          actual_features =
+            n_features,
+
+          permutation =
+            seq_along(
+              random_correlations
+            ),
+
+          random_structure_correlation =
+            random_correlations
+        )
+      }
+    )
+  )
+
+random_structure_results
+```
+
+
+
+# 36V. Observed PCA-selected feature correlations. Retrieve the correlation obtained with the actual PCA-selected features. 
+
+```{r}
+
+observed_structure_results <-
+  pca_structure_correlations %>%
+
+  filter(
+    actual_features %in%
+      permutation_feature_sizes
+  ) %>%
+
+  select(
+    actual_features,
+    observed_correlation =
+      structure_correlation
+  )
+
+observed_structure_results
+```
+
+# 36W. Empirical permutation p-values. For every feature-set size, how often did a random feature set preserve the full PCA structure at least as well as our PCA-selected feature set?
+```{r}
+pca_reduction_permutation_tests <-
+  observed_structure_results %>%
+
+  left_join(
+
+    random_structure_results %>%
+
+      group_by(
+        actual_features
+      ) %>%
+
+      summarise(
+
+        random_mean =
+          mean(
+            random_structure_correlation,
+            na.rm = TRUE
+          ),
+
+        random_median =
+          median(
+            random_structure_correlation,
+            na.rm = TRUE
+          ),
+
+        random_sd =
+          sd(
+            random_structure_correlation,
+            na.rm = TRUE
+          ),
+
+        random_lower_95 =
+          quantile(
+            random_structure_correlation,
+            0.025,
+            na.rm = TRUE
+          ),
+
+        random_upper_95 =
+          quantile(
+            random_structure_correlation,
+            0.975,
+            na.rm = TRUE
+          ),
+
+        .groups =
+          "drop"
+      ),
+
+    by =
+      "actual_features"
+  )
+```
+
+#calculate the empirical p-value separately
+```{r}
+pca_reduction_permutation_tests <-
+  pca_reduction_permutation_tests %>%
+
+  rowwise() %>%
+
+  mutate(
+
+    empirical_p_value = {
+
+      random_values <-
+        random_structure_results %>%
+
+        filter(
+          actual_features ==
+            .data$actual_features
+        ) %>%
+
+        pull(
+          random_structure_correlation
+        )
+
+      (
+        sum(
+          random_values >=
+            observed_correlation,
+          na.rm = TRUE
+        ) + 1
+      ) /
+        (
+          length(
+            random_values
+          ) + 1
+        )
+    }
+  ) %>%
+
+  ungroup()
+
+pca_reduction_permutation_tests
+```
+
+
+
+# 36X. Plot observed structure preservation against
+# random feature-set expectation
+```{r}
+pca_reduction_random_plot <-
+  ggplot(
+    pca_reduction_permutation_tests,
+    aes(
+      x = actual_features
+    )
+  ) +
+
+  geom_ribbon(
+    aes(
+      ymin =
+        random_lower_95,
+
+      ymax =
+        random_upper_95
+    ),
+
+    alpha =
+      0.25
+  ) +
+
+  geom_line(
+    aes(
+      y =
+        random_mean
+    ),
+
+    linetype =
+      "dashed"
+  ) +
+
+  geom_point(
+    aes(
+      y =
+        observed_correlation
+    ),
+
+    size =
+      3
+  ) +
+
+  geom_line(
+    aes(
+      y =
+        observed_correlation
+    )
+  ) +
+
+  scale_x_log10() +
+
+  labs(
+
+    title =
+      "PCA structure retained during feature reduction",
+
+    subtitle =
+      "Observed PCA-selected features compared with random feature subsets",
+
+    x =
+      "Number of features (log scale)",
+
+    y =
+      "Correlation with full PCA sample structure"
+  ) +
+
+  theme_classic()
+
+pca_reduction_random_plot
+```
+
+#figure interpretation
+#solid observed line
+how well PCA-selected features preserve the full structure
+
+dashed line = average preservation from random feature sets
+
+ribbon = 95% range from random feature subsets
+
+# 36Y. Empirical p-values across feature reductions. Tests whether PCA-selected features preserve structure. Essential question: do PCA-selected features preserve gloabl structure better than random subjects?
+```{r}
+
+pca_reduction_pvalue_plot <-
+  ggplot(
+    pca_reduction_permutation_tests,
+    aes(
+      x =
+        actual_features,
+
+      y =
+        empirical_p_value
+    )
+  ) +
+
+  geom_point(
+    size = 3
+  ) +
+
+  geom_line() +
+
+  geom_hline(
+    yintercept =
+      0.05,
+
+    linetype =
+      "dashed"
+  ) +
+
+  scale_x_log10() +
+
+  labs(
+
+    title =
+      "Permutation evidence across PCA feature reductions",
+
+    subtitle =
+      "Tests whether PCA-selected features preserve structure better than random subsets",
+
+    x =
+      "Number of features (log scale)",
+
+    y =
+      "Empirical p-value"
+  ) +
+
+  theme_classic()
+
+pca_reduction_pvalue_plot
+```
+
+
+# 36Z. Save quantitative PCA-reduction results
+```{r}
+
+write.csv(
+  pca_structure_correlations,
+  "positive_mode_PCA_structure_correlations.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  pca_structure_mantel,
+  "positive_mode_PCA_structure_mantel_tests.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  random_structure_results,
+  "positive_mode_PCA_random_feature_permutations.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  pca_reduction_permutation_tests,
+  "positive_mode_PCA_feature_reduction_permutation_tests.csv",
+  row.names = FALSE
+)
+```
+
+# most of 36 is about "As I progressively restrict the metabolome to the strongest PCA-associated features, do I still recover the same relationships among my biological samples?"
+
+
+
+#37. Presence/absence analysis across biological groups. Use feature_qc, not the imputed PCA matrix. Presence/absence must be based on actual observed peak heights.
+
+#First define all sample groups:
 
 # ------------------------------------------------------------
 # PRESENCE / ABSENCE ANALYSIS
@@ -2896,7 +4582,7 @@ normalized_comparisons <- lapply(
 ```
 
 
-61. Comparison-specific PCA function
+#61. Comparison-specific PCA function. PCA Scored tell us which samples/groups separate along those PCs? Or, where the samples fall along those axes. 
 
 ```{r}
 run_quantitative_pca <- function(
@@ -8171,10 +9857,5 @@ write.csv(
   "PI_strict_cross_system_candidates.csv",
   row.names = FALSE
 )
-```
-
-
-```{r}
-rsconnect::writeManifest()
 ```
 

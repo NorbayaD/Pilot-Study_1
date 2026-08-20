@@ -1,0 +1,3301 @@
+---
+title: "MetaboAnalyst_Pilot Study 1 LCMS"
+output: html_document
+date: "2026-08-17"
+---
+
+```{r}
+library(MetaboAnalystR)
+
+packageVersion("MetaboAnalystR")
+```
+
+
+```{r}
+library(readxl)
+```
+#1: Read and convert the MS-DIAL workbooks
+```{r}
+positive_file <- file.choose()
+# Select: postive mode height(2).xlsx
+
+negative_file <- file.choose()
+# Select: negative mode height(1).xlsx
+```
+
+#extract features and metadata
+```{r}
+prepare_msdial <- function(file, mode = c("positive", "negative")) {
+
+  mode <- match.arg(mode)
+
+  raw <- readxl::read_excel(
+    file,
+    col_names = FALSE,
+    .name_repair = "minimal"
+  )
+
+  # MS-DIAL information rows
+  classes   <- as.character(unlist(raw[1, ]))
+  filetypes <- as.character(unlist(raw[2, ]))
+  orders    <- as.character(unlist(raw[3, ]))
+  batches   <- as.character(unlist(raw[4, ]))
+  headers   <- as.character(unlist(raw[5, ]))
+
+  # Columns designated by MS-DIAL as samples or blanks
+  sample_cols <- which(filetypes %in% c("Sample", "Blank"))
+
+  sample_names <- headers[sample_cols]
+  sample_class <- classes[sample_cols]
+
+  # Feature metadata begin after the five MS-DIAL header rows
+  feature_metadata <- data.frame(
+    Alignment_ID = raw[[1]][-(1:5)],
+    RT_min       = as.numeric(raw[[2]][-(1:5)]),
+    MZ           = as.numeric(raw[[3]][-(1:5)]),
+    Name         = as.character(raw[[4]][-(1:5)]),
+    Adduct       = as.character(raw[[5]][-(1:5)]),
+    stringsAsFactors = FALSE
+  )
+
+  # Make unique and informative feature names
+  feature_names <- paste0(
+    mode,
+    "_ID", feature_metadata$Alignment_ID,
+    "_mz", sprintf("%.5f", feature_metadata$MZ),
+    "_rt", sprintf("%.3f", feature_metadata$RT_min)
+  )
+
+  # Extract feature-intensity matrix
+  intensities <- raw[-(1:5), sample_cols, drop = FALSE]
+  intensities <- as.data.frame(
+    lapply(intensities, as.numeric),
+    check.names = FALSE
+  )
+
+  colnames(intensities) <- sample_names
+  rownames(intensities) <- feature_names
+
+  # Samples in rows, features in columns
+  metabo_table <- data.frame(
+    Sample = sample_names,
+    Class  = sample_class,
+    t(as.matrix(intensities)),
+    check.names = FALSE
+  )
+
+  metadata_table <- data.frame(
+    Sample          = sample_names,
+    Class           = sample_class,
+    File_type       = filetypes[sample_cols],
+    Injection_order = as.numeric(orders[sample_cols]),
+    Batch           = batches[sample_cols],
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    data = metabo_table,
+    features = feature_metadata,
+    metadata = metadata_table,
+    intensities = intensities
+  )
+}
+```
+
+
+#2 create positive and negative objects, separating data
+```{r}
+positive <- prepare_msdial(positive_file, "positive")
+negative <- prepare_msdial(negative_file, "negative")
+```
+
+
+#remove confirmed empty columns
+```{r}
+positive$data <- subset(
+  positive$data,
+  Sample != "blank_4"
+)
+
+positive$metadata <- subset(
+  positive$metadata,
+  Sample != "blank_4"
+)
+
+negative$data <- subset(
+  negative$data,
+  Sample != "blank_7"
+)
+
+negative$metadata <- subset(
+  negative$metadata,
+  Sample != "blank_7"
+)
+```
+
+#verify sample tables
+```{r}
+positive$metadata
+negative$metadata
+
+table(positive$data$Class)
+table(negative$data$Class)
+```
+
+#feature identifiers to the metadata
+
+#Your feature names contain alignment ID, m/z, and retention time, but positive$features and negative$features currently do not contain the constructed feature identifier
+```{r}
+positive$features$Feature <- colnames(positive$data)[-(1:2)]
+negative$features$Feature <- colnames(negative$data)[-(1:2)]
+```
+
+#verify. This will allow us to join the eventual p-values and fold changes back to:
+
+*Alignment ID*
+*m/z*
+*Retention time*
+*Adduct*
+*Tentative name*
+
+#Without this addition, interpreting the statistical results becomes more difficult.
+```{r}
+head(positive$features)
+head(negative$features)
+```
+
+
+#3: Save untouched MetaboAnalyst input tables; preserve all 5,169 positive and 3,186 negative features while excluding only the two completely empty columns.
+```{r}
+write.csv(
+  positive$data,
+  "positive_mode_MetaboAnalyst_unfiltered.csv",
+  row.names = FALSE
+)
+
+
+write.csv(
+  negative$data,
+  "negative_mode_MetaboAnalyst_unfiltered.csv",
+  row.names = FALSE
+)
+
+
+```
+
+
+#4 Before filtering or normalization, let’s assess detection and sample signal. Notes: median intensity among features with an intensity greater than zero.
+```{r}
+sample_qc <- function(dat) {
+
+
+  x <- as.data.frame(dat[, -(1:2), drop = FALSE])
+  x[] <- lapply(x, as.numeric)
+
+
+  data.frame(
+    Sample = dat$Sample,
+    Class = dat$Class,
+    Total_signal = rowSums(x, na.rm = TRUE),
+    Median_positive = apply(
+      x,
+      1,
+      function(z) median(z[z > 0], na.rm = TRUE)
+    ),
+    Detected_features = rowSums(x > 0, na.rm = TRUE),
+    Zero_percent = 100 * rowMeans(x == 0, na.rm = TRUE)
+  )
+}
+
+
+positive_qc <- sample_qc(positive$data)
+negative_qc <- sample_qc(negative$data)
+
+
+positive_qc
+negative_qc
+```
+
+#Create sample-level QC plots:
+
+```{r}
+par(mfrow = c(2, 2), mar = c(9, 4, 3, 1))
+
+
+barplot(
+  positive_qc$Detected_features,
+  names.arg = positive_qc$Sample,
+  las = 2,
+  main = "Positive mode: detected features",
+  ylab = "Number of features"
+)
+
+
+barplot(
+  log10(positive_qc$Total_signal + 1),
+  names.arg = positive_qc$Sample,
+  las = 2,
+  main = "Positive mode: total signal",
+  ylab = "log10 total intensity"
+)
+
+
+barplot(
+  negative_qc$Detected_features,
+  names.arg = negative_qc$Sample,
+  las = 2,
+  main = "Negative mode: detected features",
+  ylab = "Number of features"
+)
+
+
+barplot(
+  log10(negative_qc$Total_signal + 1),
+  names.arg = negative_qc$Sample,
+  las = 2,
+  main = "Negative mode: total signal",
+  ylab = "log10 total intensity"
+)
+
+
+par(mfrow = c(1, 1))
+```
+
+#Save the QC summaries:
+```{r}
+write.csv(
+  positive_qc,
+  "positive_mode_sample_QC.csv",
+  row.names = FALSE
+)
+
+
+write.csv(
+  negative_qc,
+  "negative_mode_sample_QC.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r}
+qc_plot <- function(qc, title_prefix) {
+
+  group_cols <- rainbow(length(unique(qc$Class)))
+  names(group_cols) <- unique(qc$Class)
+
+  par(mfrow = c(2, 1), mar = c(10, 5, 3, 1))
+
+  barplot(
+    qc$Detected_features,
+    names.arg = qc$Sample,
+    col = group_cols[qc$Class],
+    las = 2,
+    cex.names = 0.7,
+    main = paste0(title_prefix, ": detected features"),
+    ylab = "Features with intensity > 0"
+  )
+
+  barplot(
+    log10(qc$Total_signal + 1),
+    names.arg = qc$Sample,
+    col = group_cols[qc$Class],
+    las = 2,
+    cex.names = 0.7,
+    main = paste0(title_prefix, ": total signal"),
+    ylab = "log10 total intensity",
+    ylim = c(
+      min(log10(qc$Total_signal + 1)) - 0.5,
+      max(log10(qc$Total_signal + 1)) + 0.5
+    )
+  )
+
+  par(mfrow = c(1, 1))
+}
+
+qc_plot(positive_qc, "Positive mode")
+qc_plot(negative_qc, "Negative mode")
+```
+```{r}
+# Close any active plotting device
+while (dev.cur() > 1) {
+  dev.off()
+}
+```
+
+#positive mode
+```{r}
+png(
+  "positive_mode_sample_QC.png",
+  width = 2400,
+  height = 1800,
+  res = 200
+)
+
+qc_plot(positive_qc, "Positive mode")
+
+dev.off()
+```
+
+
+#negative mode
+```{r}
+png(
+  "negative_mode_sample_QC.png",
+  width = 2400,
+  height = 1800,
+  res = 200
+)
+
+qc_plot(negative_qc, "Negative mode")
+
+dev.off()
+```
+The images will be saved in your working directory. Find that location with:
+```{r}
+getwd()
+```
+
+#To display one inside RStudio:
+
+```{r}
+img <- png::readPNG("positive_mode_sample_QC.png")
+grid::grid.raster(img)
+```
+
+#If png is not installed:
+
+```{r}
+install.packages("png")
+```
+
+
+#Alternatively, enlarge the RStudio Plots pane and reduce the margins:
+
+```{r}
+par(mar = c(6, 4, 3, 1))
+```
+
+
+#5. Create the comparison-preparation function
+
+```{r}
+prepare_comparison <- function(
+    dat,
+    group1,
+    group2,
+    min_detected = 2
+) {
+
+
+  # Select only the requested groups
+  selected <- dat$Class %in% c(group1, group2)
+  comparison <- dat[selected, , drop = FALSE]
+
+
+  # Keep sample information separate
+  sample_info <- comparison[, c("Sample", "Class")]
+
+
+  # Extract the intensity matrix
+  intensities <- comparison[, -(1:2), drop = FALSE]
+  intensities[] <- lapply(intensities, as.numeric)
+
+
+  # Treat MS-DIAL zeros as nondetections
+  intensities[intensities == 0] <- NA
+
+
+  group1_rows <- sample_info$Class == group1
+  group2_rows <- sample_info$Class == group2
+
+
+  # Count detections within each group
+  detected_group1 <- colSums(
+    !is.na(intensities[group1_rows, , drop = FALSE])
+  )
+
+
+  detected_group2 <- colSums(
+    !is.na(intensities[group2_rows, , drop = FALSE])
+  )
+
+
+  # Retain features detected in at least 2/3 replicates
+  # in either comparison group
+  keep <- detected_group1 >= min_detected |
+          detected_group2 >= min_detected
+
+
+  filtered_intensities <- intensities[, keep, drop = FALSE]
+
+
+  output <- data.frame(
+    Sample = sample_info$Sample,
+    Class = sample_info$Class,
+    filtered_intensities,
+    check.names = FALSE
+  )
+
+
+  detection_summary <- data.frame(
+    Feature = names(intensities),
+    Group1 = group1,
+    Group2 = group2,
+    Detected_group1 = detected_group1,
+    Detected_group2 = detected_group2,
+    Retained = keep,
+    stringsAsFactors = FALSE
+  )
+
+
+  list(
+    data = output,
+    detection = detection_summary
+  )
+}
+```
+
+#6. Prepare positive and negative comparisons
+
+```{r}
+fungal_positive <- prepare_comparison(
+  positive$data,
+  group1 = "FC",
+  group2 = "fungi_old",
+  min_detected = 2
+)
+
+
+fungal_negative <- prepare_comparison(
+  negative$data,
+  group1 = "FC",
+  group2 = "fungi_old",
+  min_detected = 2
+)
+```
+
+#7. Check what was retained
+
+```{r}
+dim(fungal_positive$data)
+dim(fungal_negative$data)
+
+
+table(fungal_positive$data$Class)
+table(fungal_negative$data$Class)
+
+
+table(fungal_positive$detection$Retained)
+table(fungal_negative$detection$Retained)
+```
+
+#8. Save the comparison tables
+```{r}
+write.csv(
+  fungal_positive$data,
+  "positive_fungi_old_vs_FC_prevalence_filtered.csv",
+  row.names = FALSE,
+  na = ""
+)
+
+
+write.csv(
+  fungal_negative$data,
+  "negative_fungi_old_vs_FC_prevalence_filtered.csv",
+  row.names = FALSE,
+  na = ""
+)
+
+
+write.csv(
+  fungal_positive$detection,
+  "positive_fungi_old_vs_FC_detection_summary.csv",
+  row.names = FALSE
+)
+
+
+write.csv(
+  fungal_negative$detection,
+  "negative_fungi_old_vs_FC_detection_summary.csv",
+  row.names = FALSE
+)
+```
+
+#9. Load the positive comparison into MetaboAnalystR
+
+```{r}
+
+positive_fungal_path <- file.path(
+  getwd(),
+  "positive_fungi_old_vs_FC_prevalence_filtered.csv"
+)
+
+# Confirm that R can locate the CSV
+file.exists(positive_fungal_path)
+```
+```{r}
+mSet_pos_fungal <- InitDataObjects(
+  "pktable",
+  "stat",
+  FALSE,
+  default.dpi = 72
+)
+```
+```{r}
+mSet_pos_fungal <- Read.TextData(
+  mSet_pos_fungal,
+  positive_fungal_path,
+  "rowu",
+  "disc"
+)
+```
+
+
+```{r}
+mSet_pos_fungal <- SanityCheckData(
+  mSet_pos_fungal
+)
+```
+
+#10. Preserve the pre-imputation object. Notes: Imputation means replacing a missing or nondetected measurement with a carefully defined numerical value so statistical calculations can proceed.
+```{r}
+mSet_pos_fungal_preimpute <- mSet_pos_fungal
+```
+
+#create an imputation function/ older version new version mismatch with function.  ReplaceMin
+```{r}
+impute_one_fifth_min <- function(dat) {
+
+  result <- dat
+
+  feature_cols <- setdiff(
+    names(result),
+    c("Sample", "Class")
+  )
+
+  imputation_report <- data.frame(
+    Feature = feature_cols,
+    Missing_before = integer(length(feature_cols)),
+    Minimum_positive = numeric(length(feature_cols)),
+    Imputed_value = numeric(length(feature_cols)),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_along(feature_cols)) {
+
+    feature <- feature_cols[i]
+    values <- as.numeric(result[[feature]])
+
+    missing <- is.na(values) | values == 0
+    positive <- values[!missing & values > 0]
+
+    imputation_report$Missing_before[i] <- sum(missing)
+
+    if (length(positive) > 0) {
+
+      minimum_positive <- min(positive)
+      replacement <- minimum_positive / 5
+
+      values[missing] <- replacement
+
+      imputation_report$Minimum_positive[i] <- minimum_positive
+      imputation_report$Imputed_value[i] <- replacement
+
+    } else {
+
+      imputation_report$Minimum_positive[i] <- NA
+      imputation_report$Imputed_value[i] <- NA
+    }
+
+    result[[feature]] <- values
+  }
+
+  list(
+    data = result,
+    report = imputation_report
+  )
+}
+```
+
+#11. Replace remaining missing values. # Custom function replaces each nondetection with
+# one-fifth of that feature's minimum positive intensity.
+
+```{r}
+fungal_positive_imputed <- impute_one_fifth_min(
+  fungal_positive$data
+)
+```
+
+#check operations, results should be zero
+```{r}
+sum(fungal_positive_imputed$report$Missing_before)
+
+sum(is.na(fungal_positive_imputed$data))
+
+head(fungal_positive_imputed$report)
+```
+#save imputed table and audit report
+```{r}
+write.csv(
+  fungal_positive_imputed$data,
+  "positive_fungi_old_vs_FC_imputed.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  fungal_positive_imputed$report,
+  "positive_fungi_old_vs_FC_imputation_report.csv",
+  row.names = FALSE
+)
+```
+
+
+#12. Reinitialize MetaboAnalystR with the imputed table
+```{r}
+positive_fungal_imputed_path <- file.path(
+  getwd(),
+  "positive_fungi_old_vs_FC_imputed.csv"
+)
+
+mSet_pos_fungal <- InitDataObjects(
+  "pktable",
+  "stat",
+  FALSE,
+  default.dpi = 72
+)
+
+mSet_pos_fungal <- Read.TextData(
+  mSet_pos_fungal,
+  positive_fungal_imputed_path,
+  "rowu",
+  "disc"
+)
+
+mSet_pos_fungal <- SanityCheckData(
+  mSet_pos_fungal
+)
+```
+
+#13
+```{r}
+mSet_pos_fungal <- PreparePrenormData(
+  mSet_pos_fungal
+)
+```
+
+#Step 14: Connect feature identifiers to MS-DIAL metadata
+
+#This should ideally appear shortly after creating positive and negative, but you can run it now:
+
+```{r}
+
+positive$features$Feature <- colnames(positive$data)[-(1:2)]
+negative$features$Feature <- colnames(negative$data)[-(1:2)]
+
+
+head(positive$features)
+head(negative$features)
+```
+
+#verify nothing is mismatched
+```{r}
+nrow(positive$features) ==
+  length(colnames(positive$data)[-(1:2)])
+
+nrow(negative$features) ==
+  length(colnames(negative$data)[-(1:2)])
+```
+#Step 15: Normalize the positive fungal comparison
+```{r}
+
+mSet_pos_fungal <- Normalization(
+  mSetObj = mSet_pos_fungal,
+  rowNorm = "NULL",
+  transNorm = "LogNorm",
+  scaleNorm = "ParetoNorm",
+  ref = "NULL",
+  ratio = FALSE,
+  ratioNum = 20
+)
+```
+
+#convert data to numeric
+```{r}
+norm_matrix <- do.call(
+  cbind,
+  lapply(
+    mSet_pos_fungal$dataSet$norm,
+    as.numeric
+  )
+)
+
+colnames(norm_matrix) <- colnames(
+  mSet_pos_fungal$dataSet$norm
+)
+
+rownames(norm_matrix) <- rownames(
+  mSet_pos_fungal$dataSet$norm
+)
+```
+
+#Step 16: Check the normalized data
+
+```{r}
+dim(norm_matrix)
+
+anyNA(norm_matrix)
+
+any(is.infinite(norm_matrix))
+
+summary(as.vector(norm_matrix))
+```
+
+
+#Step 17: Generate normalization QC plots
+
+```{r}
+pre_norm_matrix <- as.matrix(
+  fungal_positive_imputed$data[, -(1:2)]
+)
+
+storage.mode(pre_norm_matrix) <- "numeric"
+
+rownames(pre_norm_matrix) <-
+  fungal_positive_imputed$data$Sample
+```
+
+#Confirm the files were created:
+
+```{r}
+norm_matrix <- do.call(
+  cbind,
+  lapply(
+    mSet_pos_fungal$dataSet$norm,
+    as.numeric
+  )
+)
+
+colnames(norm_matrix) <- colnames(
+  mSet_pos_fungal$dataSet$norm
+)
+
+rownames(norm_matrix) <- rownames(
+  mSet_pos_fungal$dataSet$norm
+)
+```
+
+#verify that the samples align
+```{r}
+rownames(pre_norm_matrix)
+
+rownames(norm_matrix)
+
+identical(
+  rownames(pre_norm_matrix),
+  rownames(norm_matrix)
+)
+```
+
+#create before NORMALIZATION
+```{r positive-fungal-before-normalization, fig.width=9, fig.height=6, dpi=150, fig.align="center", out.width="90%"}
+
+par(mar = c(8, 5, 4, 1))
+
+boxplot(
+  lapply(
+    seq_len(nrow(pre_norm_matrix)),
+    function(i) log2(pre_norm_matrix[i, ])
+  ),
+  names = rownames(pre_norm_matrix),
+  las = 2,
+  cex.axis = 0.8,
+  col = c(
+    rep("lightblue", 3),
+    rep("salmon", 3)
+  ),
+  main = "Before normalization",
+  ylab = "Log2 imputed peak height",
+  outline = FALSE
+)
+```
+#after normalization
+
+The following plot shows the data after MetaboAnalystR applied logarithmic transformation and Pareto scaling.
+
+```{r positive-fungal-after-normalization, fig.width=9, fig.height=6, dpi=150, fig.align="center", out.width="90%"}
+
+par(mar = c(8, 5, 4, 1))
+
+boxplot(
+  lapply(
+    seq_len(nrow(norm_matrix)),
+    function(i) norm_matrix[i, ]
+  ),
+  names = rownames(norm_matrix),
+  las = 2,
+  cex.axis = 0.8,
+  col = c(
+    rep("lightblue", 3),
+    rep("salmon", 3)
+  ),
+  main = "After log transformation and Pareto scaling",
+  ylab = "Normalized intensity",
+  outline = FALSE
+)
+
+abline(
+  h = 0,
+  lty = 2,
+  col = "gray50"
+)
+
+legend(
+  "topright",
+  legend = c("Fungal control", "Fungi old"),
+  fill = c("lightblue", "salmon"),
+  bty = "n"
+)
+```
+
+#create numerical normalization summry
+
+```{r positive-fungal-normalization-summary}
+
+normalization_qc <- data.frame(
+  Sample = rownames(pre_norm_matrix),
+
+  Class = fungal_positive_imputed$data$Class,
+
+  Pre_log2_median = apply(
+    log2(pre_norm_matrix),
+    1,
+    median
+  ),
+
+  Pre_log2_IQR = apply(
+    log2(pre_norm_matrix),
+    1,
+    IQR
+  ),
+
+  Post_median = apply(
+    norm_matrix,
+    1,
+    median
+  ),
+
+  Post_IQR = apply(
+    norm_matrix,
+    1,
+    IQR
+  )
+)
+
+normalization_qc
+```
+
+#save it
+
+```{r save-positive-fungal-normalization-summary}
+
+write.csv(
+  normalization_qc,
+  "positive_fungal_normalization_QC_summary.csv",
+  row.names = FALSE
+)
+```
+
+
+#Step 18: Connect additional MS-DIAL metadata
+
+```{r}
+positive_raw <- readxl::read_excel(
+  positive_file,
+  col_names = FALSE,
+  .name_repair = "minimal"
+)
+
+
+positive$features$Feature <- colnames(
+  positive$data
+)[-(1:2)]
+
+
+positive$features$MSMS_assigned <- as.logical(
+  positive_raw[[8]][-(1:5)]
+)
+
+
+positive$features$S_N_average <- as.numeric(
+  positive_raw[[29]][-(1:5)]
+)
+
+
+positive$features$Post_curation_result <- as.character(
+  positive_raw[[6]][-(1:5)]
+)
+
+
+head(positive$features)
+```
+
+#Verify alignment:
+
+```{r}
+stopifnot(
+  nrow(positive$features) ==
+    length(colnames(positive$data)[-(1:2)])
+)
+
+
+stopifnot(
+  identical(
+    positive$features$Feature,
+    colnames(positive$data)[-(1:2)]
+  )
+)
+```
+
+#Step 19. Define the differential-analysis function. This function calculates detection counts, group means, log2 fold change, welch's t-test, and Benjamini-Hochberg FDR for every retained feature.
+
+#detection count: number of replicates with an original nonzero measurement
+#log2 fold change: difference between the mean log2 intensity in fungi_old vs FC
+#Welch's t-test compares group means without assuming equal variances.
+#benjamini-Hochberg FDR: corrects the p-values for testing thousands of features simultaneously. Positive log2 fold change= high abundance in fungi_old, neg= higher abundance in FC.
+
+```{r}
+calculate_differential <- function(
+    original_data,
+    imputed_data,
+    control = "FC",
+    treatment = "fungi_old"
+) {
+
+  feature_names <- setdiff(
+    names(imputed_data),
+    c("Sample", "Class")
+  )
+
+  stopifnot(
+    identical(
+      feature_names,
+      setdiff(
+        names(original_data),
+        c("Sample", "Class")
+      )
+    )
+  )
+
+  safe_mean <- function(x) {
+
+    x <- x[
+      !is.na(x) &
+      is.finite(x) &
+      x > 0
+    ]
+
+    if (length(x) == 0) {
+      return(NA_real_)
+    }
+
+    mean(x)
+  }
+
+  safe_welch <- function(
+      control_values,
+      treatment_values
+  ) {
+
+    tryCatch(
+      t.test(
+        treatment_values,
+        control_values,
+        paired = FALSE,
+        var.equal = FALSE
+      )$p.value,
+      error = function(e) NA_real_
+    )
+  }
+
+  results <- lapply(
+    feature_names,
+    function(feature) {
+
+      original_values <- as.numeric(
+        original_data[[feature]]
+      )
+
+      imputed_values <- as.numeric(
+        imputed_data[[feature]]
+      )
+
+      original_control <- original_values[
+        original_data$Class == control
+      ]
+
+      original_treatment <- original_values[
+        original_data$Class == treatment
+      ]
+
+      imputed_control <- imputed_values[
+        imputed_data$Class == control
+      ]
+
+      imputed_treatment <- imputed_values[
+        imputed_data$Class == treatment
+      ]
+
+      log2_control <- log2(
+        imputed_control
+      )
+
+      log2_treatment <- log2(
+        imputed_treatment
+      )
+
+      data.frame(
+        Feature = feature,
+
+        Detected_FC = sum(
+          !is.na(original_control) &
+          original_control > 0
+        ),
+
+        Detected_fungi_old = sum(
+          !is.na(original_treatment) &
+          original_treatment > 0
+        ),
+
+        Mean_observed_FC = safe_mean(
+          original_control
+        ),
+
+        Mean_observed_fungi_old = safe_mean(
+          original_treatment
+        ),
+
+        Mean_imputed_FC = mean(
+          imputed_control
+        ),
+
+        Mean_imputed_fungi_old = mean(
+          imputed_treatment
+        ),
+
+        Log2FC_fungi_vs_FC =
+          mean(log2_treatment) -
+          mean(log2_control),
+
+        Welch_p_value = safe_welch(
+          log2_control,
+          log2_treatment
+        ),
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  results <- do.call(
+    rbind,
+    results
+  )
+
+  results$FDR_BH <- p.adjust(
+    results$Welch_p_value,
+    method = "BH"
+  )
+
+  results
+}
+```
+
+#step 20: run positive-mode differential analysis
+
+```{r}
+positive_fungal_stats <- calculate_differential(
+  original_data = fungal_positive$data,
+  imputed_data = fungal_positive_imputed$data,
+  control = "FC",
+  treatment = "fungi_old"
+)
+```
+
+
+#check output
+```{r}
+dim(positive_fungal_stats)
+
+head(positive_fungal_stats)
+
+summary(
+  positive_fungal_stats$Log2FC_fungi_vs_FC
+)
+
+summary(
+  positive_fungal_stats$Welch_p_value
+)
+
+summary(
+  positive_fungal_stats$FDR_BH
+)
+
+sum(
+  is.na(
+    positive_fungal_stats$Welch_p_value
+  )
+)
+```
+
+#count the initial significant features
+```{r}
+sum(
+  positive_fungal_stats$FDR_BH < 0.05,
+  na.rm = TRUE
+)
+
+sum(
+  positive_fungal_stats$FDR_BH < 0.05 &
+    abs(
+      positive_fungal_stats$Log2FC_fungi_vs_FC
+    ) >= 1,
+  na.rm = TRUE
+)
+```
+#step 21: join the statistics to MS-DUAL metadata
+```{r}
+metadata_match <- match(
+  positive_fungal_stats$Feature,
+  positive$features$Feature
+)
+
+sum(
+  is.na(metadata_match)
+)
+```
+#join the tables
+```{r}
+positive_fungal_results <- cbind(
+  positive_fungal_stats,
+
+  positive$features[
+    metadata_match,
+    c(
+      "Alignment_ID",
+      "RT_min",
+      "MZ",
+      "Name",
+      "Adduct",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result"
+    )
+  ]
+)
+```
+
+
+#verify the joined tables
+```{r}
+dim(positive_fungal_results)
+
+head(
+  positive_fungal_results[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Adduct",
+      "Log2FC_fungi_vs_FC",
+      "Welch_p_value",
+      "FDR_BH"
+    )
+  ]
+)
+```
+
+
+
+#flag retention times below one minute
+```{r}
+positive_fungal_results$RT_below_1_min <-
+  positive_fungal_results$RT_min < 1
+
+table(
+  positive_fungal_results$RT_below_1_min,
+  useNA = "ifany"
+)
+```
+#step 22: add detection-pattern categories
+```{r}
+positive_fungal_results$Detection_pattern <- with(
+  positive_fungal_results,
+
+  ifelse(
+    Detected_fungi_old == 3 &
+      Detected_FC == 0,
+
+    "Fungi 3/3; FC 0/3",
+
+    ifelse(
+      Detected_fungi_old == 3 &
+        Detected_FC <= 1,
+
+      "Fungi consistent; FC sparse",
+
+      ifelse(
+        Detected_FC == 3 &
+          Detected_fungi_old == 0,
+
+        "FC 3/3; fungi 0/3",
+
+        ifelse(
+          Detected_FC == 3 &
+            Detected_fungi_old == 3,
+
+          "Detected 3/3 in both",
+
+          "Variably detected"
+        )
+      )
+    )
+  )
+)
+```
+
+#count the categories
+```{r}
+table(
+  positive_fungal_results$Detection_pattern
+)
+```
+#step 23: sort and save all differential results
+```{r}
+positive_fungal_results <- positive_fungal_results[
+  order(
+    positive_fungal_results$FDR_BH,
+
+    -abs(
+      positive_fungal_results$Log2FC_fungi_vs_FC
+    ),
+
+    na.last = TRUE
+  ),
+]
+```
+
+#save all tested features
+```{r}
+write.csv(
+  positive_fungal_results,
+  "positive_fungi_old_vs_FC_full_differential_results.csv",
+  row.names = FALSE
+)
+```
+
+#confirm file was saved
+```{r}
+file.exists(
+  "positive_fungi_old_vs_FC_full_differential_results.csv"
+)
+```
+#step 24: create the preliminary candidate shortlist. FDR= <0.05, absoloute log2 fold change of at least 1 (at least twofold difference)
+```{r}
+positive_fungal_candidates <- subset(
+  positive_fungal_results,
+
+  !is.na(FDR_BH) &
+    FDR_BH < 0.05 &
+    abs(Log2FC_fungi_vs_FC) >= 1
+)
+```
+
+#save candidate list
+```{r}
+write.csv(
+  positive_fungal_candidates,
+  "positive_fungi_old_vs_FC_FDR05_FC2_candidates.csv",
+  row.names = FALSE
+)
+```
+
+
+#summarize results
+```{r}
+nrow(positive_fungal_results)
+
+nrow(positive_fungal_candidates)
+
+table(
+  positive_fungal_candidates$Detection_pattern
+)
+
+table(
+  positive_fungal_candidates$RT_below_1_min,
+  useNA = "ifany"
+)
+
+table(
+  positive_fungal_candidates$MSMS_assigned,
+  useNA = "ifany"
+)
+```
+
+
+#display the first 20 candidates
+```{r}
+head(
+  positive_fungal_candidates[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Adduct",
+      "Detected_FC",
+      "Detected_fungi_old",
+      "Mean_observed_FC",
+      "Mean_observed_fungi_old",
+      "Log2FC_fungi_vs_FC",
+      "Welch_p_value",
+      "FDR_BH",
+      "MSMS_assigned",
+      "S_N_average",
+      "RT_below_1_min",
+      "Detection_pattern"
+    )
+  ],
+  20
+)
+```
+
+#step 25: display the three FDR-significant features
+```{r}
+positive_fungal_FDR_significant <- subset(
+  positive_fungal_results,
+  !is.na(FDR_BH) &
+    FDR_BH < 0.05
+)
+
+positive_fungal_FDR_significant[
+  ,
+  c(
+    "Feature",
+    "Alignment_ID",
+    "MZ",
+    "RT_min",
+    "Adduct",
+    "Detected_FC",
+    "Detected_fungi_old",
+    "Mean_observed_FC",
+    "Mean_observed_fungi_old",
+    "Log2FC_fungi_vs_FC",
+    "Welch_p_value",
+    "FDR_BH",
+    "MSMS_assigned",
+    "S_N_average",
+    "RT_below_1_min",
+    "Detection_pattern"
+  )
+]
+```
+#save without twofold restriction
+```{r}
+write.csv(
+  positive_fungal_FDR_significant,
+  "positive_fungi_old_vs_FC_FDR05_all_effect_sizes.csv",
+  row.names = FALSE
+)
+```
+
+#step 26" count nominal and large-effect features
+```{r}
+sum(
+  positive_fungal_results$Welch_p_value < 0.05,
+  na.rm = TRUE
+)
+
+sum(
+  positive_fungal_results$Welch_p_value < 0.05 &
+    abs(
+      positive_fungal_results$Log2FC_fungi_vs_FC
+    ) >= 1,
+  na.rm = TRUE
+)
+
+sum(
+  abs(
+    positive_fungal_results$Log2FC_fungi_vs_FC
+  ) >= 1,
+  na.rm = TRUE
+)
+```
+
+#step 27: create the reproducible detection list.
+```{r}
+positive_fungal_detection_candidates <- subset(
+  positive_fungal_results,
+
+  Detection_pattern %in% c(
+    "Fungi 3/3; FC 0/3",
+    "Fungi consistent; FC sparse"
+  )
+)
+```
+
+#sort the list
+```{r}
+positive_fungal_detection_candidates <-
+  positive_fungal_detection_candidates[
+    order(
+      -positive_fungal_detection_candidates$Detected_fungi_old,
+      positive_fungal_detection_candidates$Detected_FC,
+      -positive_fungal_detection_candidates$Log2FC_fungi_vs_FC
+    ),
+  ]
+```
+
+
+#save the list
+```{r}
+write.csv(
+  positive_fungal_detection_candidates,
+  "positive_fungi_old_vs_FC_reproducible_detection_candidates.csv",
+  row.names = FALSE
+)
+
+nrow(
+  positive_fungal_detection_candidates
+)
+```
+
+
+#list of FDR-supported ion list
+```{r}
+positive_fungal_FDR_ion_list <-
+  positive_fungal_FDR_significant[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Adduct",
+      "Detected_FC",
+      "Detected_fungi_old",
+      "Log2FC_fungi_vs_FC",
+      "Welch_p_value",
+      "FDR_BH",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result",
+      "RT_below_1_min"
+    )
+  ]
+
+positive_fungal_FDR_ion_list
+```
+
+
+
+#save it
+```{r}
+write.csv(
+  positive_fungal_FDR_ion_list,
+  "positive_fungi_old_vs_FC_FDR_significant_ion_list.csv",
+  row.names = FALSE
+)
+```
+
+
+#create the reproducible fungal-assosicated ion list
+```{r}
+positive_fungal_detection_ion_list <-
+  positive_fungal_detection_candidates[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Adduct",
+      "Detected_FC",
+      "Detected_fungi_old",
+      "Mean_observed_FC",
+      "Mean_observed_fungi_old",
+      "Log2FC_fungi_vs_FC",
+      "Welch_p_value",
+      "FDR_BH",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result",
+      "RT_below_1_min",
+      "Detection_pattern"
+    )
+  ]
+```
+
+#display first 20
+```{r}
+head(
+  positive_fungal_detection_ion_list,
+  20
+)
+```
+
+#save it
+```{r}
+write.csv(
+  positive_fungal_detection_ion_list,
+  "positive_fungi_old_vs_FC_reproducible_ion_list.csv",
+  row.names = FALSE
+)
+```
+
+
+#count ions with MS/MS spectra
+```{r}
+table(
+  positive_fungal_detection_ion_list$MSMS_assigned,
+  useNA = "ifany"
+)
+
+sum(
+  positive_fungal_detection_ion_list$MSMS_assigned %in% TRUE,
+  na.rm = TRUE
+)
+```
+
+##step 1 verify class names
+
+```{r}
+table(positive$data$Class)
+
+stopifnot(
+  all(c("root", "leaf") %in% positive$data$Class)
+)
+```
+
+#step 2 prevalence-folter root versus leaf in 2/3 replicates
+```{r}
+root_leaf_positive <- prepare_comparison(
+  positive$data,
+  group1 = "leaf",
+  group2 = "root",
+  min_detected = 2
+)
+
+dim(root_leaf_positive$data)
+table(root_leaf_positive$data$Class)
+table(root_leaf_positive$detection$Retained)
+```
+
+#confrim 3 samples in each group
+```{r}
+stopifnot(
+  all(
+    table(root_leaf_positive$data$Class)[c("leaf", "root")] == 3
+  )
+)
+```
+
+#save filtered data
+```{r}
+write.csv(
+  root_leaf_positive$data,
+  "positive_root_vs_leaf_prevalence_filtered.csv",
+  row.names = FALSE,
+  na = ""
+)
+
+write.csv(
+  root_leaf_positive$detection,
+  "positive_root_vs_leaf_detection_summary.csv",
+  row.names = FALSE
+)
+```
+
+
+#step 3 impute remaining nondetections
+```{r}
+root_leaf_positive_imputed <- impute_one_fifth_min(
+  root_leaf_positive$data
+)
+
+sum(root_leaf_positive_imputed$report$Missing_before)
+sum(is.na(root_leaf_positive_imputed$data))
+
+head(root_leaf_positive_imputed$report)
+```
+
+
+#save imputed data and audit report
+```{r}
+write.csv(
+  root_leaf_positive_imputed$data,
+  "positive_root_vs_leaf_imputed.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  root_leaf_positive_imputed$report,
+  "positive_root_vs_leaf_imputation_report.csv",
+  row.names = FALSE
+)
+```
+
+
+#step 4 load and normalize in MetaboAnalystR
+```{r}
+positive_root_leaf_path <- file.path(
+  getwd(),
+  "positive_root_vs_leaf_imputed.csv"
+)
+
+stopifnot(file.exists(positive_root_leaf_path))
+
+mSet_pos_root_leaf <- InitDataObjects(
+  "pktable",
+  "stat",
+  FALSE,
+  default.dpi = 72
+)
+
+mSet_pos_root_leaf <- Read.TextData(
+  mSet_pos_root_leaf,
+  positive_root_leaf_path,
+  "rowu",
+  "disc"
+)
+
+mSet_pos_root_leaf <- SanityCheckData(
+  mSet_pos_root_leaf
+)
+
+mSet_pos_root_leaf <- PreparePrenormData(
+  mSet_pos_root_leaf
+)
+
+mSet_pos_root_leaf <- Normalization(
+  mSetObj = mSet_pos_root_leaf,
+  rowNorm = "NULL",
+  transNorm = "LogNorm",
+  scaleNorm = "ParetoNorm",
+  ref = "NULL",
+  ratio = FALSE,
+  ratioNum = 20
+)
+```
+
+#extract and check the normalized matrix
+```{r}
+root_leaf_norm_matrix <- do.call(
+  cbind,
+  lapply(
+    mSet_pos_root_leaf$dataSet$norm,
+    as.numeric
+  )
+)
+
+colnames(root_leaf_norm_matrix) <- colnames(
+  mSet_pos_root_leaf$dataSet$norm
+)
+
+rownames(root_leaf_norm_matrix) <- rownames(
+  mSet_pos_root_leaf$dataSet$norm
+)
+
+dim(root_leaf_norm_matrix)
+anyNA(root_leaf_norm_matrix)
+any(is.infinite(root_leaf_norm_matrix))
+```
+
+#step 5 use a comparison-safe differential function
+```{r}
+calculate_differential_general <- function(
+    original_data,
+    imputed_data,
+    reference,
+    treatment
+) {
+
+  feature_names <- setdiff(
+    names(imputed_data),
+    c("Sample", "Class")
+  )
+
+  stopifnot(
+    identical(
+      feature_names,
+      setdiff(
+        names(original_data),
+        c("Sample", "Class")
+      )
+    )
+  )
+
+  stopifnot(
+    all(c(reference, treatment) %in% original_data$Class)
+  )
+
+  safe_mean <- function(x) {
+
+    x <- x[
+      !is.na(x) &
+        is.finite(x) &
+        x > 0
+    ]
+
+    if (length(x) == 0) {
+      return(NA_real_)
+    }
+
+    mean(x)
+  }
+
+  safe_welch <- function(reference_values, treatment_values) {
+
+    if (
+      length(reference_values) < 2 ||
+      length(treatment_values) < 2 ||
+      !all(is.finite(reference_values)) ||
+      !all(is.finite(treatment_values))
+    ) {
+      return(NA_real_)
+    }
+
+    tryCatch(
+      t.test(
+        treatment_values,
+        reference_values,
+        paired = FALSE,
+        var.equal = FALSE
+      )$p.value,
+      error = function(e) NA_real_
+    )
+  }
+
+  results <- lapply(
+    feature_names,
+    function(feature) {
+
+      original_values <- as.numeric(
+        original_data[[feature]]
+      )
+
+      imputed_values <- as.numeric(
+        imputed_data[[feature]]
+      )
+
+      original_reference <- original_values[
+        original_data$Class == reference
+      ]
+
+      original_treatment <- original_values[
+        original_data$Class == treatment
+      ]
+
+      imputed_reference <- imputed_values[
+        imputed_data$Class == reference
+      ]
+
+      imputed_treatment <- imputed_values[
+        imputed_data$Class == treatment
+      ]
+
+      log2_reference <- log2(imputed_reference)
+      log2_treatment <- log2(imputed_treatment)
+
+      data.frame(
+        Feature = feature,
+
+        Detected_reference = sum(
+          !is.na(original_reference) &
+            original_reference > 0
+        ),
+
+        Detected_treatment = sum(
+          !is.na(original_treatment) &
+            original_treatment > 0
+        ),
+
+        Mean_observed_reference = safe_mean(
+          original_reference
+        ),
+
+        Mean_observed_treatment = safe_mean(
+          original_treatment
+        ),
+
+        Mean_imputed_reference = mean(
+          imputed_reference
+        ),
+
+        Mean_imputed_treatment = mean(
+          imputed_treatment
+        ),
+
+        Log2FC = mean(log2_treatment) -
+          mean(log2_reference),
+
+        Welch_p_value = safe_welch(
+          log2_reference,
+          log2_treatment
+        ),
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  results <- do.call(rbind, results)
+
+  names(results)[
+    names(results) == "Detected_reference"
+  ] <- paste0("Detected_", reference)
+
+  names(results)[
+    names(results) == "Detected_treatment"
+  ] <- paste0("Detected_", treatment)
+
+  names(results)[
+    names(results) == "Mean_observed_reference"
+  ] <- paste0("Mean_observed_", reference)
+
+  names(results)[
+    names(results) == "Mean_observed_treatment"
+  ] <- paste0("Mean_observed_", treatment)
+
+  names(results)[
+    names(results) == "Mean_imputed_reference"
+  ] <- paste0("Mean_imputed_", reference)
+
+  names(results)[
+    names(results) == "Mean_imputed_treatment"
+  ] <- paste0("Mean_imputed_", treatment)
+
+  names(results)[
+    names(results) == "Log2FC"
+  ] <- paste0("Log2FC_", treatment, "_vs_", reference)
+
+  results$FDR_BH <- p.adjust(
+    results$Welch_p_value,
+    method = "BH"
+  )
+
+  results
+}
+```
+
+
+#step 6 run root versus leaf
+```{r}
+positive_root_leaf_stats <- calculate_differential_general(
+  original_data = root_leaf_positive$data,
+  imputed_data = root_leaf_positive_imputed$data,
+  reference = "leaf",
+  treatment = "root"
+)
+
+dim(positive_root_leaf_stats)
+head(positive_root_leaf_stats)
+```
+
+#check the results
+```{r}
+summary(
+  positive_root_leaf_stats$Log2FC_root_vs_leaf
+)
+
+summary(
+  positive_root_leaf_stats$Welch_p_value
+)
+
+summary(
+  positive_root_leaf_stats$FDR_BH
+)
+
+sum(
+  is.na(positive_root_leaf_stats$Welch_p_value)
+)
+```
+
+
+#count statistically supported ions
+```{r}
+sum(
+  positive_root_leaf_stats$FDR_BH < 0.05,
+  na.rm = TRUE
+)
+
+sum(
+  positive_root_leaf_stats$FDR_BH < 0.05 &
+    abs(
+      positive_root_leaf_stats$Log2FC_root_vs_leaf
+    ) >= 1,
+  na.rm = TRUE
+)
+```
+
+#step 7 join the MS-DIAL metadata
+```{r}
+root_leaf_metadata_match <- match(
+  positive_root_leaf_stats$Feature,
+  positive$features$Feature
+)
+
+stopifnot(
+  !any(is.na(root_leaf_metadata_match))
+)
+
+positive_root_leaf_results <- cbind(
+  positive_root_leaf_stats,
+
+  positive$features[
+    root_leaf_metadata_match,
+    c(
+      "Alignment_ID",
+      "RT_min",
+      "MZ",
+      "Name",
+      "Adduct",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result"
+    )
+  ]
+)
+```
+
+
+#flag ions eluting before one minute
+```{r}
+positive_root_leaf_results$RT_below_1_min <-
+  positive_root_leaf_results$RT_min < 1
+
+table(
+  positive_root_leaf_results$RT_below_1_min,
+  useNA = "ifany"
+)
+```
+
+#step 8 add detection-pattern categories
+```{r}
+positive_root_leaf_results$Detection_pattern <- with(
+  positive_root_leaf_results,
+
+  ifelse(
+    Detected_root == 3 &
+      Detected_leaf == 0,
+
+    "Root 3/3; leaf 0/3",
+
+    ifelse(
+      Detected_root == 3 &
+        Detected_leaf <= 1,
+
+      "Root consistent; leaf sparse",
+
+      ifelse(
+        Detected_leaf == 3 &
+          Detected_root == 0,
+
+        "Leaf 3/3; root 0/3",
+
+        ifelse(
+          Detected_leaf == 3 &
+            Detected_root == 3,
+
+          "Detected 3/3 in both",
+
+          "Variably detected"
+        )
+      )
+    )
+  )
+)
+
+table(
+  positive_root_leaf_results$Detection_pattern
+)
+```
+#step 9 sort and save all tested ions
+```{r}
+positive_root_leaf_results <-
+  positive_root_leaf_results[
+    order(
+      positive_root_leaf_results$FDR_BH,
+      -abs(
+        positive_root_leaf_results$Log2FC_root_vs_leaf
+      ),
+      na.last = TRUE
+    ),
+  ]
+
+write.csv(
+  positive_root_leaf_results,
+  "positive_root_vs_leaf_full_differential_results.csv",
+  row.names = FALSE
+)
+```
+
+
+#step 10 prioritu identification list
+```{r}
+positive_root_leaf_candidates <- subset(
+  positive_root_leaf_results,
+
+  !is.na(FDR_BH) &
+    FDR_BH < 0.05 &
+    abs(Log2FC_root_vs_leaf) >= 1
+)
+
+write.csv(
+  positive_root_leaf_candidates,
+  "positive_root_vs_leaf_FDR05_FC2_candidates.csv",
+  row.names = FALSE
+)
+
+nrow(positive_root_leaf_candidates)
+```
+#create concise identification-ready list
+```{r}
+positive_root_leaf_ion_list <-
+  positive_root_leaf_candidates[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Name",
+      "Adduct",
+      "Detected_leaf",
+      "Detected_root",
+      "Mean_observed_leaf",
+      "Mean_observed_root",
+      "Log2FC_root_vs_leaf",
+      "Welch_p_value",
+      "FDR_BH",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result",
+      "RT_below_1_min",
+      "Detection_pattern"
+    )
+  ]
+
+head(
+  positive_root_leaf_ion_list,
+  20
+)
+
+write.csv(
+  positive_root_leaf_ion_list,
+  "positive_root_vs_leaf_priority_ion_list.csv",
+  row.names = FALSE
+)
+```
+
+#step 11 save all FDR-supported ions without the fold change restriction
+```{r}
+positive_root_leaf_FDR_significant <- subset(
+  positive_root_leaf_results,
+
+  !is.na(FDR_BH) &
+    FDR_BH < 0.05
+)
+
+write.csv(
+  positive_root_leaf_FDR_significant,
+  "positive_root_vs_leaf_FDR05_all_effect_sizes.csv",
+  row.names = FALSE
+)
+
+nrow(positive_root_leaf_FDR_significant)
+```
+
+#turface with roots, turface without roots
+
+
+#step 1: verify and rename the groups
+```{r}
+table(positive$data$Class)
+
+stopifnot(
+  all(
+    c("exudate", "Soil_control") %in%
+      positive$data$Class
+  )
+)
+```
+#display samples that will be used
+```{r}
+positive$metadata[
+  positive$metadata$Class %in%
+    c("exudate", "Soil_control"),
+  c("Sample", "Class")
+]
+```
+
+#Create the comparison using the original class names:
+```{r}
+turface_positive <- prepare_comparison(
+  positive$data,
+  group1 = "Soil_control",
+  group2 = "exudate",
+  min_detected = 2
+)
+```
+
+#Rename the classes:
+
+```{r}
+turface_positive$data$Class[
+  turface_positive$data$Class == "Soil_control"
+] <- "Turface_without_root"
+
+
+turface_positive$data$Class[
+  turface_positive$data$Class == "exudate"
+] <- "Turface_with_root"
+```
+
+#Also update the labels in the detection summary:
+
+```{r}
+turface_positive$detection$Group1[
+  turface_positive$detection$Group1 == "Soil_control"
+] <- "Turface_without_root"
+
+
+turface_positive$detection$Group2[
+  turface_positive$detection$Group2 == "exudate"
+] <- "Turface_with_root"
+```
+
+
+#Verify the renamed groups:
+```{r}
+table(turface_positive$data$Class)
+
+
+head(
+  turface_positive$data[
+    ,
+    c("Sample", "Class")
+  ]
+)
+```
+
+#Confirm that there are three replicates per group:
+```{r}
+stopifnot(
+  all(
+    table(turface_positive$data$Class)[
+      c(
+        "Turface_without_root",
+        "Turface_with_root"
+      )
+    ] == 3
+  )
+)
+```
+
+#Step 2: Examine prevalence filtering
+
+```{r}
+dim(turface_positive$data)
+
+
+table(
+  turface_positive$detection$Retained
+)
+
+
+sum(
+  turface_positive$detection$Retained
+)
+```
+
+#Save the prevalence-filtered data:
+```{r}
+write.csv(
+  turface_positive$data,
+  "positive_Turface_with_root_vs_without_root_prevalence_filtered.csv",
+  row.names = FALSE,
+  na = ""
+)
+
+
+write.csv(
+  turface_positive$detection,
+  "positive_Turface_with_root_vs_without_root_detection_summary.csv",
+  row.names = FALSE
+)
+```
+
+#Confirm that the files were created:
+
+```{r}
+file.exists(
+  "positive_Turface_with_root_vs_without_root_prevalence_filtered.csv"
+)
+
+
+file.exists(
+  "positive_Turface_with_root_vs_without_root_detection_summary.csv"
+)
+```
+
+#Step 3: Impute nondetected values. Use the same one-fifth minimum imputation applied to the earlier comparisons:
+
+```{r}
+turface_positive_imputed <- impute_one_fifth_min(
+  turface_positive$data
+)
+```
+
+#Check the imputation:
+
+```{r}
+sum(
+  turface_positive_imputed$report$Missing_before
+)
+
+
+sum(
+  is.na(turface_positive_imputed$data)
+)
+
+
+head(
+  turface_positive_imputed$report
+)
+```
+
+#Save the imputed data and imputation audit report:
+
+```{r}
+write.csv(
+  turface_positive_imputed$data,
+  "positive_Turface_with_root_vs_without_root_imputed.csv",
+  row.names = FALSE
+)
+
+
+write.csv(
+  turface_positive_imputed$report,
+  "positive_Turface_with_root_vs_without_root_imputation_report.csv",
+  row.names = FALSE
+)
+```
+
+#Step 4: Load the comparison into MetaboAnalystR
+
+```{r}
+positive_turface_path <- file.path(
+  getwd(),
+  "positive_Turface_with_root_vs_without_root_imputed.csv"
+)
+
+
+stopifnot(
+  file.exists(positive_turface_path)
+)
+```
+
+#Initialize the MetaboAnalyst object:
+
+```{r}
+mSet_pos_turface <- InitDataObjects(
+  "pktable",
+  "stat",
+  FALSE,
+  default.dpi = 72
+)
+```
+
+#Read the data:
+
+```{r}
+mSet_pos_turface <- Read.TextData(
+  mSet_pos_turface,
+  positive_turface_path,
+  "rowu",
+  "disc"
+)
+```
+
+#Check and prepare the data:
+
+```{r}
+mSet_pos_turface <- SanityCheckData(
+  mSet_pos_turface
+)
+
+
+mSet_pos_turface <- PreparePrenormData(
+  mSet_pos_turface
+)
+```
+
+#Step 5: Normalize the data. Use the same normalization settings as the fungal and root-versus-leaf comparisons:
+
+
+```{r}
+mSet_pos_turface <- Normalization(
+  mSetObj = mSet_pos_turface,
+  rowNorm = "NULL",
+  transNorm = "LogNorm",
+  scaleNorm = "ParetoNorm",
+  ref = "NULL",
+  ratio = FALSE,
+  ratioNum = 20
+)
+```
+
+#Extract the normalized matrix:
+
+```{r}
+turface_norm_matrix <- do.call(
+  cbind,
+  lapply(
+    mSet_pos_turface$dataSet$norm,
+    as.numeric
+  )
+)
+
+
+colnames(turface_norm_matrix) <- colnames(
+  mSet_pos_turface$dataSet$norm
+)
+
+
+rownames(turface_norm_matrix) <- rownames(
+  mSet_pos_turface$dataSet$norm
+)
+```
+
+#Check the normalized data:
+
+```{r}
+dim(turface_norm_matrix)
+
+
+anyNA(turface_norm_matrix)
+
+
+any(
+  is.infinite(turface_norm_matrix)
+)
+
+
+summary(
+  as.vector(turface_norm_matrix)
+)
+```
+
+#Step 6: Create before- and after-normalization matrices
+
+```{r}
+turface_pre_norm_matrix <- as.matrix(
+  turface_positive_imputed$data[
+    ,
+    -(1:2)
+  ]
+)
+
+
+storage.mode(turface_pre_norm_matrix) <- "numeric"
+
+
+rownames(turface_pre_norm_matrix) <-
+  turface_positive_imputed$data$Sample
+```
+
+#Confirm sample alignment:
+
+```{r}
+rownames(turface_pre_norm_matrix)
+
+
+rownames(turface_norm_matrix)
+
+
+identical(
+  rownames(turface_pre_norm_matrix),
+  rownames(turface_norm_matrix)
+)
+```
+
+#Step 7: Plot before normalization
+
+```{r}
+par(
+  mar = c(8, 5, 4, 1)
+)
+
+
+turface_colors <- ifelse(
+  turface_positive_imputed$data$Class ==
+    "Turface_without_root",
+  "lightblue",
+  "darkseagreen3"
+)
+
+
+boxplot(
+  lapply(
+    seq_len(
+      nrow(turface_pre_norm_matrix)
+    ),
+    function(i) {
+      log2(
+        turface_pre_norm_matrix[i, ]
+      )
+    }
+  ),
+  names = rownames(
+    turface_pre_norm_matrix
+  ),
+  las = 2,
+  cex.axis = 0.8,
+  col = turface_colors,
+  main = paste(
+    "Turface with root vs Turface without root:",
+    "before normalization"
+  ),
+  ylab = "Log2 imputed peak height",
+  outline = FALSE
+)
+
+
+legend(
+  "topright",
+  legend = c(
+    "Turface without root",
+    "Turface with root"
+  ),
+  fill = c(
+    "lightblue",
+    "darkseagreen3"
+  ),
+  bty = "n"
+)
+```
+
+#Step 8: Plot after normalization
+
+```{r}
+par(
+  mar = c(8, 5, 4, 1)
+)
+
+
+boxplot(
+  lapply(
+    seq_len(
+      nrow(turface_norm_matrix)
+    ),
+    function(i) {
+      turface_norm_matrix[i, ]
+    }
+  ),
+  names = rownames(
+    turface_norm_matrix
+  ),
+  las = 2,
+  cex.axis = 0.8,
+  col = turface_colors,
+  main = paste(
+    "Turface with root vs Turface without root:",
+    "after normalization"
+  ),
+  ylab = "Normalized intensity",
+  outline = FALSE
+)
+
+
+abline(
+  h = 0,
+  lty = 2,
+  col = "gray50"
+)
+
+
+legend(
+  "topright",
+  legend = c(
+    "Turface without root",
+    "Turface with root"
+  ),
+  fill = c(
+    "lightblue",
+    "darkseagreen3"
+  ),
+  bty = "n"
+)
+```
+
+#Step 9: Create the normalization QC summary
+
+```{r}
+turface_normalization_qc <- data.frame(
+  Sample = rownames(
+    turface_pre_norm_matrix
+  ),
+
+
+  Class = turface_positive_imputed$data$Class,
+
+
+  Pre_log2_median = apply(
+    log2(turface_pre_norm_matrix),
+    1,
+    median
+  ),
+
+
+  Pre_log2_IQR = apply(
+    log2(turface_pre_norm_matrix),
+    1,
+    IQR
+  ),
+
+
+  Post_median = apply(
+    turface_norm_matrix,
+    1,
+    median
+  ),
+
+
+  Post_IQR = apply(
+    turface_norm_matrix,
+    1,
+    IQR
+  )
+)
+
+
+turface_normalization_qc
+```
+
+#Save it:
+
+```{r}
+write.csv(
+  turface_normalization_qc,
+  "positive_Turface_with_root_vs_without_root_normalization_QC.csv",
+  row.names = FALSE
+)
+```
+
+#Step 10: Run the differential-abundance analysis. Set Turface without root as the reference and Turface with root as the treatment:
+```{r}
+positive_turface_stats <-
+  calculate_differential_general(
+    original_data =
+      turface_positive$data,
+
+
+    imputed_data =
+      turface_positive_imputed$data,
+
+
+    reference =
+      "Turface_without_root",
+
+
+    treatment =
+      "Turface_with_root"
+  )
+```
+
+#Check the results:
+```{r}
+dim(
+  positive_turface_stats
+)
+
+
+head(
+  positive_turface_stats
+)
+
+
+summary(
+  positive_turface_stats$
+    Log2FC_Turface_with_root_vs_Turface_without_root
+)
+
+
+summary(
+  positive_turface_stats$Welch_p_value
+)
+
+
+summary(
+  positive_turface_stats$FDR_BH
+)
+
+
+sum(
+  is.na(
+    positive_turface_stats$Welch_p_value
+  )
+)
+```
+
+#Count FDR-supported ions:
+
+```{r}
+sum(
+  positive_turface_stats$FDR_BH < 0.05,
+  na.rm = TRUE
+)
+```
+
+#Count FDR-supported ions with at least a twofold difference:
+
+```{r}
+sum(
+  positive_turface_stats$FDR_BH < 0.05 &
+    abs(
+      positive_turface_stats$
+        Log2FC_Turface_with_root_vs_Turface_without_root
+    ) >= 1,
+  na.rm = TRUE
+)
+```
+
+#Step 11: Join the statistics to the MS-DIAL metadata
+
+```{r}
+turface_metadata_match <- match(
+  positive_turface_stats$Feature,
+  positive$features$Feature
+)
+
+
+sum(
+  is.na(turface_metadata_match)
+)
+
+
+stopifnot(
+  !any(
+    is.na(turface_metadata_match)
+  )
+)
+```
+
+#Join the tables:
+
+```{r}
+positive_turface_results <- cbind(
+  positive_turface_stats,
+
+
+  positive$features[
+    turface_metadata_match,
+    c(
+      "Alignment_ID",
+      "RT_min",
+      "MZ",
+      "Name",
+      "Adduct",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result"
+    )
+  ]
+)
+```
+
+#Verify the joined table:
+
+```{r}
+dim(
+  positive_turface_results
+)
+
+
+head(
+  positive_turface_results[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Adduct",
+      "Log2FC_Turface_with_root_vs_Turface_without_root",
+      "Welch_p_value",
+      "FDR_BH"
+    )
+  ]
+)
+```
+
+#Step 12: Flag retention times below one minute
+
+```{r}
+positive_turface_results$RT_below_1_min <-
+  positive_turface_results$RT_min < 1
+
+
+table(
+  positive_turface_results$RT_below_1_min,
+  useNA = "ifany"
+)
+```
+
+#Step 13: Add abundance direction
+
+```{r}
+positive_turface_results$Abundance_direction <- with(
+  positive_turface_results,
+
+
+  ifelse(
+    Log2FC_Turface_with_root_vs_Turface_without_root > 0,
+
+
+    "Higher in Turface with root",
+
+
+    ifelse(
+      Log2FC_Turface_with_root_vs_Turface_without_root < 0,
+
+
+      "Higher in Turface without root",
+
+
+      "No change"
+    )
+  )
+)
+```
+
+#Add an ordinary root-containing/root-free abundance ratio:
+```{r}
+positive_turface_results$
+  Fold_change_with_root_over_without_root <-
+  2^positive_turface_results$
+    Log2FC_Turface_with_root_vs_Turface_without_root
+```
+
+#Add the fold-change magnitude:
+
+```{r}
+positive_turface_results$Fold_change_magnitude <-
+  2^abs(
+    positive_turface_results$
+      Log2FC_Turface_with_root_vs_Turface_without_root
+  )
+```
+
+#Check the direction counts:
+
+```{r}
+table(
+  positive_turface_results$Abundance_direction
+)
+```
+
+# Positive Log2FC:
+# higher in Turface with root
+
+
+# Negative Log2FC:
+# higher in Turface without root
+
+
+#Step 14: Add detection-pattern categories
+
+```{r}
+positive_turface_results$Detection_pattern <- with(
+  positive_turface_results,
+
+
+  ifelse(
+    Detected_Turface_with_root == 3 &
+      Detected_Turface_without_root == 0,
+
+
+    "With root 3/3; without root 0/3",
+
+
+    ifelse(
+      Detected_Turface_with_root == 3 &
+        Detected_Turface_without_root <= 1,
+
+
+      "With root consistent; without root sparse",
+
+
+      ifelse(
+        Detected_Turface_without_root == 3 &
+          Detected_Turface_with_root == 0,
+
+
+        "Without root 3/3; with root 0/3",
+
+
+        ifelse(
+          Detected_Turface_without_root == 3 &
+            Detected_Turface_with_root == 3,
+
+
+          "Detected 3/3 in both",
+
+
+          "Variably detected"
+        )
+      )
+    )
+  )
+)
+```
+
+#Count the categories:
+
+
+```{r}
+table(
+  positive_turface_results$Detection_pattern
+)
+```
+
+Step 15: Sort and save all differential results
+
+
+```{r}
+positive_turface_results <-
+  positive_turface_results[
+    order(
+      positive_turface_results$FDR_BH,
+      -abs(
+        positive_turface_results$
+          Log2FC_Turface_with_root_vs_Turface_without_root
+      ),
+
+
+      na.last = TRUE
+    ),
+  ]
+```
+
+#Save all tested ions:
+
+```{r}
+write.csv(
+  positive_turface_results,
+  "positive_Turface_with_root_vs_without_root_full_differential_results.csv",
+  row.names = FALSE
+)
+```
+
+#Step 16: Create the FDR-supported list
+
+This list includes every ion with FDR < 0.05, regardless of fold-change magnitude:
+```{r}
+positive_turface_FDR_significant <- subset(
+  positive_turface_results,
+
+
+  !is.na(FDR_BH) &
+    FDR_BH < 0.05
+)
+
+
+nrow(
+  positive_turface_FDR_significant
+)
+```
+
+#Save it:
+
+```{r}
+write.csv(
+  positive_turface_FDR_significant,
+  "positive_Turface_with_root_vs_without_root_FDR05_all_effect_sizes.csv",
+  row.names = FALSE
+)
+```
+
+#Step 17: Create the strict priority list. Require:FDR < 0.05 absolute log₂ fold change of at least 1
+```{r}
+positive_turface_candidates <- subset(
+  positive_turface_results,
+
+
+  !is.na(FDR_BH) &
+    FDR_BH < 0.05 &
+    abs(
+      Log2FC_Turface_with_root_vs_Turface_without_root
+    ) >= 1
+)
+```
+
+#Count the candidates:
+
+```{r}
+nrow(
+  positive_turface_candidates
+)
+
+
+table(
+  positive_turface_candidates$Abundance_direction
+)
+
+
+table(
+  positive_turface_candidates$RT_below_1_min,
+  useNA = "ifany"
+)
+
+
+table(
+  positive_turface_candidates$MSMS_assigned,
+  useNA = "ifany"
+)
+```
+
+#Step 18: Create the identification-ready ion list
+
+```{r}
+positive_turface_ion_list <-
+  positive_turface_candidates[
+    ,
+    c(
+      "Feature",
+      "Alignment_ID",
+      "MZ",
+      "RT_min",
+      "Name",
+      "Adduct",
+      "Detected_Turface_without_root",
+      "Detected_Turface_with_root",
+      "Mean_observed_Turface_without_root",
+      "Mean_observed_Turface_with_root",
+      "Log2FC_Turface_with_root_vs_Turface_without_root",
+      "Abundance_direction",
+      "Fold_change_with_root_over_without_root",
+      "Fold_change_magnitude",
+      "Welch_p_value",
+      "FDR_BH",
+      "MSMS_assigned",
+      "S_N_average",
+      "Post_curation_result",
+      "RT_below_1_min",
+      "Detection_pattern"
+    )
+  ]
+```
+
+
+#Display the first 20 candidates:
+
+```{r}
+head(
+  positive_turface_ion_list,
+  20
+)
+```
+
+#save priority list
+```{r}
+write.csv(
+  positive_turface_ion_list,
+  "positive_Turface_with_root_vs_without_root_priority_ion_list.csv",
+  row.names = FALSE
+)
+```
+
+#Step 19: Create a supplementary reproducible-detection list. This captures ions consistently detected in Turface with root but absent or sparse in Turface without root:
+```{r}
+positive_turface_detection_candidates <- subset(
+  positive_turface_results,
+
+
+  Detection_pattern %in% c(
+    "With root 3/3; without root 0/3",
+    "With root consistent; without root sparse"
+  )
+)
+```
+
+#Sort the list:
+
+```{r}
+positive_turface_detection_candidates <-
+  positive_turface_detection_candidates[
+    order(
+      -positive_turface_detection_candidates$
+        Detected_Turface_with_root,
+
+
+      positive_turface_detection_candidates$
+        Detected_Turface_without_root,
+
+
+      -positive_turface_detection_candidates$
+        Log2FC_Turface_with_root_vs_Turface_without_root
+    ),
+  ]
+```
+
+#Save it:
+
+```{r}
+write.csv(
+  positive_turface_detection_candidates,
+  "positive_Turface_with_root_vs_without_root_reproducible_detection_list.csv",
+  row.names = FALSE
+)
+
+
+nrow(
+  positive_turface_detection_candidates
+)
+```
+
+#Step 20: Final result summary
+
+```{r}
+turface_analysis_summary <- data.frame(
+  Comparison =
+    "Turface with root vs Turface without root",
+
+
+  Prevalence_filtered_ions =
+    nrow(positive_turface_results),
+
+
+  Raw_p_below_0_05 =
+    sum(
+      positive_turface_results$Welch_p_value < 0.05,
+      na.rm = TRUE
+    ),
+
+
+  FDR_below_0_05 =
+    sum(
+      positive_turface_results$FDR_BH < 0.05,
+      na.rm = TRUE
+    ),
+
+
+  FDR_below_0_05_and_twofold =
+    sum(
+      positive_turface_results$FDR_BH < 0.05 &
+        abs(
+          positive_turface_results$
+            Log2FC_Turface_with_root_vs_Turface_without_root
+        ) >= 1,
+      na.rm = TRUE
+    ),
+
+
+  Reproducible_with_root_detection =
+    nrow(
+      positive_turface_detection_candidates
+    )
+)
+
+
+turface_analysis_summary
+```
+
+#Save the summary:
+
+```{r}
+write.csv(
+  turface_analysis_summary,
+  "positive_Turface_with_root_vs_without_root_analysis_summary.csv",
+  row.names = FALSE
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
